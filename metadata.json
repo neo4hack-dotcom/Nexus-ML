@@ -1,0 +1,6 @@
+{
+  "name": "Nexus AutoML",
+  "description": "Local-first Automated Machine Learning platform powered by custom LLMs",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
