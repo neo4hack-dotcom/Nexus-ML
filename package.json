@@ -5,9 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "backend": "python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000",
-    "backend:reload": "python3 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000",
-    "quickstart": "npm run backend & npm run dev",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",

@@ -92,7 +92,7 @@ VITE_API_BASE_URL="http://localhost:8000"
 Terminal 1, backend :
 
 ```bash
-npm run backend
+python3 -m backend
 ```
 
 Le backend démarre sur :
@@ -115,22 +115,29 @@ http://localhost:3000
 
 Si le port 3000 est occupé, Vite choisira automatiquement un autre port, par exemple `3001`.
 
-### Option rapide
+### Backend avec reload
+
+Le backend reste exclusivement Python. Pour activer le reload FastAPI en développement :
 
 ```bash
-npm run quickstart
+BACKEND_RELOAD=true python3 -m backend
 ```
 
-Cette commande lance le backend et le frontend en même temps. Pour un usage de développement quotidien, deux terminaux restent plus lisibles.
+Variables disponibles :
+
+| Variable | Défaut | Description |
+| --- | --- | --- |
+| `BACKEND_HOST` | `127.0.0.1` | Interface réseau du backend |
+| `BACKEND_PORT` | `8000` | Port du backend |
+| `BACKEND_RELOAD` | `false` | Active le reload uvicorn |
 
 ## Scripts NPM
+
+Les scripts npm sont réservés au frontend. Le backend se lance avec Python.
 
 | Commande | Description |
 | --- | --- |
 | `npm run dev` | Lance le frontend Vite |
-| `npm run backend` | Lance FastAPI sur `127.0.0.1:8000` |
-| `npm run backend:reload` | Lance FastAPI avec reload automatique |
-| `npm run quickstart` | Lance backend et frontend ensemble |
 | `npm run build` | Compile le frontend de production |
 | `npm run preview` | Prévisualise le build Vite |
 | `npm run lint` | Vérifie TypeScript avec `tsc --noEmit` |

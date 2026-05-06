@@ -161,7 +161,7 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
 
             {state.backendConfig.status === 'offline' && (
               <div className="text-sm text-red-200 bg-red-500/10 p-3 rounded-sm border border-red-500/20">
-                Start the backend with <span className="font-mono">npm run backend</span>, then refresh this screen.
+                Start the backend with <span className="font-mono">python3 -m backend</span>, then refresh this screen.
               </div>
             )}
           </div>
