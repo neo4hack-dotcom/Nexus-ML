@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { AppState, MLModel } from '../types';
-import { Play, Check, CircleAlert, Loader2, FastForward } from 'lucide-react';
+import { AppState } from '../types';
+import { Check, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { api } from '../lib/api';
 
 export function PipelineView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
   const terminalRef = useRef<HTMLDivElement>(null);
+  const hasStartedRef = useRef(false);
+  const lastLogCountRef = useRef(0);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -13,126 +16,76 @@ export function PipelineView({ state, dispatch }: { state: AppState; dispatch: R
     }
   }, [state.pipelineSteps]);
 
-  // The engine that simulates the ML run!
   useEffect(() => {
-    let timeoutIds: NodeJS.Timeout[] = [];
-    const runSimulation = () => {
-      // Only start if pending
-      if (state.pipelineSteps[0].status !== 'pending') return;
+    const runPipeline = async () => {
+      if (!state.dataset || !state.targetColumn || state.pipelineSteps[0].status !== 'pending' || hasStartedRef.current) return;
+      hasStartedRef.current = true;
 
-      const scheduleLog = (stepId: string, log: string, delay: number, status?: 'running' | 'success' | 'error') => {
-        const id = setTimeout(() => {
-          if (status) {
-            dispatch({ type: 'UPDATE_STEP_STATUS', stepId, log, status });
-          } else {
-            dispatch({ type: 'UPDATE_STEP_STATUS', stepId, log, status: 'running' }); // Keep it running if it's just a log
-          }
-        }, delay);
-        timeoutIds.push(id);
+      const update = (stepId: string, status: 'running' | 'success' | 'error', log: string) => {
+        dispatch({ type: 'UPDATE_STEP_STATUS', stepId, status, log });
       };
 
-      let time = 500;
+      update('ingest', 'running', 'Opening dataset from Python backend storage...');
+      update('ingest', 'success', `Loaded ${state.dataset.filename}: ${state.dataset.rowCount} rows, ${state.dataset.colCount} columns.`);
+      update('clean', 'running', 'Preparing pandas cleaning plan: blank normalization and missing value strategies.');
+      update('feature', 'running', 'Building scikit-learn ColumnTransformer for numeric and categorical features.');
+      update('train', 'running', 'Starting Python AutoML benchmark...');
 
-      // --- INGEST ---
-      scheduleLog('ingest', 'Initializing data pipeline...', time, 'running'); time += 800;
-      scheduleLog('ingest', `Loading ${state.dataset?.filename} into memory...`, time); time += 600;
-      scheduleLog('ingest', `Parsed ${state.dataset?.rowCount} rows, ${state.dataset?.colCount} columns.`, time); time += 800;
-      scheduleLog('ingest', 'Data Validation Passed.', time, 'success'); time += 500;
+      try {
+        const job = await api.startTrainingJob(state.dataset.id, state.targetColumn, state.problemType, state.excludedColumns);
+        dispatch({ type: 'SET_CURRENT_JOB', job });
+        lastLogCountRef.current = job.logs.length;
 
-      // --- CLEAN ---
-      scheduleLog('clean', 'Analyzing missing values...', time, 'running'); time += 1200;
-      state.dataset?.columns.forEach(col => {
-        if (col.missingCount > 0) {
-          scheduleLog('clean', `Imputing ${col.missingCount} missing values in '${col.name}' using ${col.type === 'numeric' ? 'median' : 'mode'} strategy...`, time);
-          time += 700;
-        }
-      });
-      scheduleLog('clean', 'Detecting outliers using Isolation Forest...', time); time += 1500;
-      scheduleLog('clean', 'Outlier removal complete.', time, 'success'); time += 500;
+        const events = new EventSource(api.jobEventsUrl(job.id));
+        events.onmessage = (event) => {
+          const nextJob = JSON.parse(event.data);
+          dispatch({ type: 'SET_CURRENT_JOB', job: nextJob });
 
-      // --- FEATURE ENGINEERING ---
-      scheduleLog('feature', 'Starting feature engineering...', time, 'running'); time += 800;
-      scheduleLog('feature', 'Applying TargetEncoder to high-cardinality categoricals...', time); time += 1200;
-      scheduleLog('feature', 'Applying StandardScaler to numeric columns...', time); time += 900;
-      scheduleLog('feature', 'Generating polynomial features for correlation pairs...', time); time += 1500;
-      scheduleLog('feature', 'Feature engineering complete. Generated 14 new features.', time, 'success'); time += 500;
+          if (nextJob.progress >= 10) update('ingest', 'success', 'Dataset loaded from persistent registry.');
+          if (nextJob.progress >= 25) update('clean', nextJob.progress >= 60 ? 'success' : 'running', 'Cleaning strategy is encoded in the Python pipeline.');
+          if (nextJob.progress >= 35) update('feature', nextJob.progress >= 75 ? 'success' : 'running', 'Feature transformer prepared and validated.');
+          if (nextJob.progress >= 50) update('train', nextJob.status === 'success' ? 'success' : 'running', `Training job ${nextJob.id}: ${nextJob.progress}%`);
+          if (nextJob.progress >= 95) update('eval', nextJob.status === 'success' ? 'success' : 'running', 'Evaluating candidate models and registry metadata.');
 
-      // --- MODEL TRAINING ---
-      scheduleLog('train', 'Initializing AutoML training loop...', time, 'running'); time += 1000;
-      
-      const modelsToTrain = state.problemType === 'regression' 
-        ? ['Random Forest Regressor', 'XGBoost Regressor', 'Ridge Regression']
-        : ['Random Forest Classifier', 'XGBoost Classifier', 'Logistic Regression'];
+          const newLogs = nextJob.logs.slice(lastLogCountRef.current);
+          lastLogCountRef.current = nextJob.logs.length;
+          newLogs.forEach((log: string) => {
+            const targetStep = log.includes('Best model') || log.includes('completed') || log.includes('finished successfully') ? 'eval' : 'train';
+            update(targetStep, nextJob.status === 'error' ? 'error' : 'running', log);
+          });
 
-      modelsToTrain.forEach(m => {
-        scheduleLog('train', `[Training] ${m}...`, time); time += 2000;
-        scheduleLog('train', `[Finished] ${m}.`, time); time += 500;
-      });
-      scheduleLog('train', 'Model ensemble created.', time, 'success'); time += 500;
+          if (nextJob.status === 'success' && nextJob.result) {
+            events.close();
+            update('clean', 'success', 'Missing value imputation configured inside the model pipeline.');
+            update('feature', 'success', 'Feature pipeline ready: median imputer, scaler, one-hot encoder.');
+            update('train', 'success', `Trained ${nextJob.result.models.length} candidate models with scikit-learn.`);
+            update('eval', 'success', 'Validation metrics, feature importance, and registry entries are ready.');
+            dispatch({ type: 'SET_TARGET', target: state.targetColumn!, problemType: nextJob.result.problemType });
+            dispatch({ type: 'SET_MODELS', models: nextJob.result.models });
+            dispatch({ type: 'SELECT_MODEL', modelId: nextJob.result.models[0].id });
+            window.setTimeout(() => dispatch({ type: 'SET_VIEW', view: 'dashboard' }), 1200);
+          }
 
-      // --- EVALUATION ---
-      scheduleLog('eval', 'Running 5-fold Cross Validation...', time, 'running'); time += 2000;
-      scheduleLog('eval', 'Calculating metrics...', time); time += 1000;
-      scheduleLog('eval', 'Pipeline execution finished successfully.', time, 'success');
+          if (nextJob.status === 'error') {
+            events.close();
+            update('train', 'error', nextJob.error || 'Training job failed');
+            update('eval', 'error', 'Pipeline stopped before evaluation.');
+          }
+        };
 
-      // Finalize models
-      const finalizeId = setTimeout(() => {
-        const isClass = state.problemType === 'classification';
-        const generatedModels: MLModel[] = modelsToTrain.map((name, i) => {
-          const baseScore = 0.75 + (Math.random() * 0.2); // Random baseline between 75-95%
-          const versionId = `v${Math.floor(Math.random() * 10)}.${Math.floor(Math.random() * 10)}`;
-          
-          return {
-            id: `model-${Date.now()}-${i}`,
-            version: versionId,
-            createdAt: Date.now(),
-            datasetId: state.dataset?.id || 'unknown',
-            name: name,
-            type: state.problemType || 'classification',
-            status: 'success',
-            metrics: {
-              [isClass ? 'accuracy' : 'r2']: baseScore + (i === 1 ? 0.05 : 0), // Make XGBoost slightly better usually
-              [isClass ? 'f1' : 'rmse']: isClass ? baseScore - 0.02 : (1 - baseScore) * 100,
-              trainingTime: Math.floor(Math.random() * 50) + 12
-            },
-            hyperparameters: {
-              learning_rate: isClass ? 0.01 : undefined,
-              max_depth: Math.floor(Math.random() * 5) + 3,
-              n_estimators: [100, 200, 500][Math.floor(Math.random() * 3)]
-            },
-            // Fake confusion matrix for classification
-            confusionMatrix: isClass ? [
-              [Math.floor(Math.random()*200)+50, Math.floor(Math.random()*20)],
-              [Math.floor(Math.random()*15), Math.floor(Math.random()*150)+80]
-            ] : undefined,
-            // Fake ROC Data
-            rocData: isClass ? Array.from({length: 10}).map((_, i) => ({ fpr: i/10, tpr: Math.min(1, (i/10) * (1.5 + baseScore)) })) : undefined
-          } as MLModel;
-        });
-
-        // Sort by accuracy/r2 descending
-        generatedModels.sort((a,b) => {
-          const aS = a.metrics?.accuracy || a.metrics?.r2 || 0;
-          const bS = b.metrics?.accuracy || b.metrics?.r2 || 0;
-          return bS - aS;
-        });
-
-        dispatch({ type: 'SET_MODELS', models: generatedModels });
-        dispatch({ type: 'SELECT_MODEL', modelId: generatedModels[0].id });
-        
-        // Auto navigate to dashboard after a delay
-        setTimeout(() => dispatch({ type: 'SET_VIEW', view: 'dashboard' }), 3000);
-
-      }, time + 500);
-      timeoutIds.push(finalizeId);
+        events.onerror = () => {
+          events.close();
+          update('train', 'error', 'Lost connection to the training event stream.');
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Pipeline failed';
+        update('train', 'error', message);
+        update('eval', 'error', 'Pipeline stopped before evaluation.');
+      }
     };
 
-    runSimulation();
-
-    return () => {
-      timeoutIds.forEach(clearTimeout);
-    };
-  }, [state.pipelineSteps[0].status, state.dataset]);
+    runPipeline();
+  }, [state.dataset, state.targetColumn, state.problemType, state.excludedColumns, state.pipelineSteps, dispatch]);
 
 
   return (
@@ -141,7 +94,18 @@ export function PipelineView({ state, dispatch }: { state: AppState; dispatch: R
         <h1 className="text-5xl md:text-6xl font-light leading-[0.9] tracking-tighter mb-4 italic serif">
           Execution <br/> <span className="font-bold not-italic">Pipeline.</span>
         </h1>
-        <p className="text-xs text-white/40 uppercase tracking-widest leading-relaxed">The AI agent is constructing and executing your machine learning pipeline locally.</p>
+        <p className="text-xs text-white/40 uppercase tracking-widest leading-relaxed">FastAPI is executing your machine learning pipeline with Python libraries.</p>
+        {state.currentJob && (
+          <div className="mt-6 max-w-xl">
+            <div className="flex justify-between text-[9px] uppercase tracking-widest text-white/40 mb-2">
+              <span>{state.currentJob.status}</span>
+              <span>{state.currentJob.progress}%</span>
+            </div>
+            <div className="h-2 bg-white/10 overflow-hidden">
+              <div className="h-full bg-emerald-400 transition-all" style={{ width: `${state.currentJob.progress}%` }} />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 h-0">

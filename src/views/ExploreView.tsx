@@ -82,11 +82,11 @@ export function ExploreView({ state }: { state: AppState }) {
             </select>
           </div>
           
-          <div className="h-72 w-full mt-4">
+          <div className="h-72 w-full min-w-0 min-h-0 mt-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={histData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={false} />
-                <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} tickMargin={10} anchor="end" angle={-15} />
+                <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} tickMargin={10} textAnchor="end" angle={-15} />
                 <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} />
                 <Tooltip 
                   cursor={{fill: 'rgba(255,255,255,0.05)'}}
@@ -120,7 +120,7 @@ export function ExploreView({ state }: { state: AppState }) {
             </div>
           </div>
 
-          <div className="h-72 w-full mt-4">
+          <div className="h-72 w-full min-w-0 min-h-0 mt-4">
             {scatterX && scatterY ? (
                <ResponsiveContainer width="100%" height="100%">
                  <ScatterChart margin={{ top: 10, right: 30, left: 10, bottom: 10 }}>

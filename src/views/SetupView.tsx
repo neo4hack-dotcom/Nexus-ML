@@ -1,15 +1,65 @@
-import React, { useState } from 'react';
-import Papa from 'papaparse';
-import { UploadCloud, Database, Settings2, FileSpreadsheet, CheckCircle2, ChevronRight } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Database, FileSpreadsheet, CheckCircle2, ChevronRight, ServerCog, Loader2, FlaskConical, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { AppState } from '../types';
-import { analyzeDataset } from '../store';
 import { cn } from '../lib/utils';
-import { motion } from 'motion/react';
+import { api } from '../lib/api';
 
 export function SetupView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
   const [dragActive, setDragActive] = useState(false);
-  const [oracleConfig, setOracleConfig] = useState({ host: '', port: '1521', user: '', password: '', sid: '' });
-  const [showOracle, setShowOracle] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
+  const [isLoadingDataset, setIsLoadingDataset] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.health()
+      .then((health) => {
+        dispatch({
+          type: 'UPDATE_BACKEND_CONFIG',
+          config: { status: 'online', engine: health.engine, baseUrl: api.baseUrl },
+        });
+        return api.registry();
+      })
+      .then((registry) => {
+        if (registry) {
+          dispatch({ type: 'SET_REGISTRY', datasets: registry.datasets, models: registry.models });
+        }
+      })
+      .catch(() => {
+        dispatch({
+          type: 'UPDATE_BACKEND_CONFIG',
+          config: { status: 'offline', baseUrl: api.baseUrl },
+        });
+      });
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (state.dataset && !state.targetColumn) {
+      const fallback = state.dataset.columns[state.dataset.columns.length - 1];
+      if (fallback) {
+        dispatch({
+          type: 'SET_TARGET',
+          target: fallback.name,
+          problemType: fallback.type === 'numeric' ? 'regression' : 'classification',
+        });
+      }
+    }
+  }, [state.dataset, state.targetColumn, dispatch]);
+
+  const handleTargetChange = (targetName: string) => {
+    const target = state.dataset?.columns.find((column) => column.name === targetName);
+    dispatch({
+      type: 'SET_TARGET',
+      target: targetName,
+      problemType: target?.type === 'numeric' ? 'regression' : 'classification',
+    });
+  };
+
+  const toggleExcludedColumn = (columnName: string) => {
+    const next = state.excludedColumns.includes(columnName)
+      ? state.excludedColumns.filter((column) => column !== columnName)
+      : [...state.excludedColumns, columnName];
+    dispatch({ type: 'SET_EXCLUDED_COLUMNS', columns: next });
+  };
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -37,35 +87,36 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
     }
   };
 
-  const handleFile = (file: File) => {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const dataset = analyzeDataset(results.data, file.name);
-        dispatch({ type: 'SET_DATASET', dataset });
-      }
-    });
+  const handleFile = async (file: File) => {
+    setError(null);
+    setIsLoadingDataset(true);
+    try {
+      const dataset = await api.uploadDataset(file);
+      dispatch({ type: 'SET_DATASET', dataset });
+      dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'online' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Dataset upload failed');
+      dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'offline' } });
+    } finally {
+      setIsLoadingDataset(false);
+    }
   };
 
-  const handleConnectDb = (e: React.FormEvent) => {
+  const handleCreateDemo = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate DB connection and fetch
-    setTimeout(() => {
-      // Create mock dataset from DB
-      const mockData = Array.from({ length: 500 }).map((_, i) => ({
-        id: i,
-        score: Math.random() * 100,
-        category: ['A', 'B', 'C'][Math.floor(Math.random() * 3)],
-        isActive: Math.random() > 0.5 ? 'YES' : 'NO',
-        revenue: Math.random() * 5000,
-      }));
-      dispatch({ 
-        type: 'SET_DATASET', 
-        dataset: analyzeDataset(mockData, `OracleDB: ${oracleConfig.sid || 'ORCL'}`) 
-      });
-      setShowOracle(false);
-    }, 1500);
+    setError(null);
+    setIsLoadingDataset(true);
+    try {
+      const dataset = await api.createDemoDataset();
+      dispatch({ type: 'SET_DATASET', dataset });
+      setShowDemo(false);
+      dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'online' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create demo dataset');
+      dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'offline' } });
+    } finally {
+      setIsLoadingDataset(false);
+    }
   };
 
   return (
@@ -75,64 +126,42 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
           Workspace <br/> <span className="font-bold not-italic">Setup.</span>
         </h1>
         <p className="text-xs text-white/40 mb-10 uppercase tracking-widest leading-relaxed">
-          Configure your local LLM engine and ingest data to begin the automated pipeline.
+          Connect the Python ML backend and ingest data to begin the automated pipeline.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* LLM Config Panel */}
+        {/* Python Engine Panel */}
         <div className="glass-panel p-6 flex flex-col gap-4">
           <div className="flex items-center gap-3 pb-4 border-b border-white/5">
-            <Settings2 className="w-4 h-4 text-white" />
-            <h2 className="text-[10px] uppercase tracking-widest font-bold">LLM Engine</h2>
+            <ServerCog className="w-4 h-4 text-white" />
+            <h2 className="text-[10px] uppercase tracking-widest font-bold">Python ML Engine</h2>
           </div>
           
           <div className="space-y-4 flex-1">
-            <div className="flex items-center gap-2 mb-4">
-              <label className="flex items-center cursor-pointer">
-                <div className="relative">
-                  <input type="checkbox" className="sr-only" 
-                    checked={state.llmConfig.isSimulated}
-                    onChange={(e) => dispatch({ 
-                      type: 'UPDATE_LLM_CONFIG', 
-                      config: { isSimulated: e.target.checked } 
-                    })} 
-                  />
-                  <div className={cn("block w-10 h-6 rounded-full transition-colors", state.llmConfig.isSimulated ? "bg-amber-500/20" : "bg-emerald-500/20")}></div>
-                  <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition", state.llmConfig.isSimulated ? "transform translate-x-4 bg-amber-500" : "bg-emerald-500")}></div>
+            <div className="flex items-center gap-3 mb-4">
+              <div className={cn(
+                "h-3 w-3 rounded-full",
+                state.backendConfig.status === 'online' ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.7)]" :
+                state.backendConfig.status === 'checking' ? "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.7)]" :
+                "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.7)]"
+              )} />
+              <div>
+                <div className="text-sm font-bold uppercase tracking-widest">
+                  {state.backendConfig.status === 'online' ? 'Backend Online' : state.backendConfig.status === 'checking' ? 'Checking Backend' : 'Backend Offline'}
                 </div>
-                <div className="ml-3 text-sm font-medium">
-                  {state.llmConfig.isSimulated ? 'Simulated Mode' : 'Connect Local LLM'}
-                </div>
-              </label>
+                <div className="text-[10px] text-white/40 font-mono">{state.backendConfig.baseUrl}</div>
+              </div>
             </div>
 
-            {!state.llmConfig.isSimulated && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">API Base URL (OpenAI Compatible)</label>
-                  <input 
-                    type="text" 
-                    value={state.llmConfig.baseUrl}
-                    onChange={(e) => dispatch({ type: 'UPDATE_LLM_CONFIG', config: { baseUrl: e.target.value } })}
-                    className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Model Name</label>
-                  <input 
-                    type="text" 
-                    value={state.llmConfig.modelName}
-                    onChange={(e) => dispatch({ type: 'UPDATE_LLM_CONFIG', config: { modelName: e.target.value } })}
-                    className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary transition-colors"
-                  />
-                </div>
-              </motion.div>
-            )}
-            {state.llmConfig.isSimulated && (
-              <div className="text-sm text-muted-foreground bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
-                Running in simulation mode. No real API calls will be made, perfect for demonstration.
+            <div className="text-sm text-muted-foreground bg-emerald-500/10 p-3 rounded-sm border border-emerald-500/20 leading-relaxed">
+              {state.backendConfig.engine}. Datasets are profiled in pandas, models are trained in scikit-learn, and inference uses serialized Python pipelines.
+            </div>
+
+            {state.backendConfig.status === 'offline' && (
+              <div className="text-sm text-red-200 bg-red-500/10 p-3 rounded-sm border border-red-500/20">
+                Start the backend with <span className="font-mono">npm run backend</span>, then refresh this screen.
               </div>
             )}
           </div>
@@ -147,19 +176,25 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
             </div>
             <div className="flex bg-black p-1 rounded-sm border border-white/10">
               <button 
-                onClick={() => setShowOracle(false)}
-                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", !showOracle && "bg-white text-black")}
+                onClick={() => setShowDemo(false)}
+                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", !showDemo && "bg-white text-black")}
               >
                 File Upload
               </button>
               <button 
-                onClick={() => setShowOracle(true)}
-                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", showOracle && "bg-white text-black")}
+                onClick={() => setShowDemo(true)}
+                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", showDemo && "bg-white text-black")}
               >
-                Oracle DB
+                Python Demo
               </button>
             </div>
           </div>
+
+          {error && (
+            <div className="mb-4 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              {error}
+            </div>
+          )}
 
           {state.dataset ? (
             <div className="flex-1 flex flex-col items-center justify-center py-8">
@@ -172,44 +207,26 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
                 <span>Columns: {state.dataset.colCount}</span>
               </p>
               <button 
-                onClick={() => dispatch({ type: 'SET_VIEW', view: 'chat' })}
+                onClick={() => dispatch({ type: 'SET_VIEW', view: state.targetColumn ? 'pipeline' : 'chat' })}
                 className="mt-8 px-6 py-3 bg-white hover:bg-[#D4D4D4] text-black uppercase tracking-[0.2em] text-xs font-bold transition-colors flex items-center gap-2"
               >
-                Start AutoML Process
+                {state.targetColumn ? 'Run Guided Pipeline' : 'Start AutoML Process'}
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
-          ) : showOracle ? (
-            <form onSubmit={handleConnectDb} className="flex-1 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Host</label>
-                  <input required placeholder="oracle.network.local" type="text" value={oracleConfig.host} onChange={e=>setOracleConfig({...oracleConfig, host: e.target.value})} className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Port</label>
-                  <input required placeholder="1521" type="text" value={oracleConfig.port} onChange={e=>setOracleConfig({...oracleConfig, port: e.target.value})} className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
-                </div>
-              </div>
+          ) : showDemo ? (
+            <form onSubmit={handleCreateDemo} className="flex-1 flex flex-col items-center justify-center gap-6 text-center py-10">
+              <FlaskConical className="w-12 h-12 text-emerald-400" />
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Service Name (SID)</label>
-                <input required placeholder="ORCL" type="text" value={oracleConfig.sid} onChange={e=>setOracleConfig({...oracleConfig, sid: e.target.value})} className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
+                <h3 className="text-xl font-medium mb-2">Generate a Python Demo Dataset</h3>
+                <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
+                  The backend will generate a classification dataset with scikit-learn, profile it with pandas, and return it to the app.
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Username</label>
-                  <input required type="text" value={oracleConfig.user} onChange={e=>setOracleConfig({...oracleConfig, user: e.target.value})} className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Password</label>
-                  <input required type="password" value={oracleConfig.password} onChange={e=>setOracleConfig({...oracleConfig, password: e.target.value})} className="w-full bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
-                </div>
-              </div>
-              <div className="pt-2">
-                <button type="submit" className="w-full py-4 bg-white hover:bg-[#D4D4D4] text-black font-bold uppercase tracking-[0.2em] text-[10px] transition-colors rounded-sm">
-                  Connect & Fetch Data
-                </button>
-              </div>
+              <button type="submit" disabled={isLoadingDataset} className="px-6 py-4 bg-white hover:bg-[#D4D4D4] text-black font-bold uppercase tracking-[0.2em] text-[10px] transition-colors rounded-sm flex items-center gap-3 disabled:opacity-50">
+                {isLoadingDataset && <Loader2 className="w-4 h-4 animate-spin" />}
+                Create Demo Dataset
+              </button>
             </form>
           ) : (
             <div 
@@ -224,11 +241,11 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
             >
               <input type="file" id="file-upload" className="hidden" accept=".csv,.xlsx,.xls" onChange={handleChange} />
               <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center flex-1 w-full justify-center">
-                <FileSpreadsheet className={cn("w-12 h-12 mb-4", dragActive ? "text-primary" : "text-muted-foreground")} />
+                {isLoadingDataset ? <Loader2 className="w-12 h-12 mb-4 animate-spin text-white" /> : <FileSpreadsheet className={cn("w-12 h-12 mb-4", dragActive ? "text-primary" : "text-muted-foreground")} />}
                 <h3 className="text-lg font-medium mb-1">Upload CSV or Excel file</h3>
-                <p className="text-sm text-muted-foreground mb-6">Drag and drop your dataset here, or click to browse</p>
+                <p className="text-sm text-muted-foreground mb-6">The file is parsed and profiled by the FastAPI backend</p>
                 <div className="px-5 py-2 rounded-full bg-white/10 text-sm font-medium hover:bg-white/20 transition-colors">
-                  Select File
+                  {isLoadingDataset ? 'Uploading...' : 'Select File'}
                 </div>
               </label>
             </div>
@@ -238,7 +255,108 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
 
       {/* Dataset Preview */}
       {state.dataset && (
-        <div className="glass-panel p-6">
+        <div className="glass-panel p-6 space-y-8">
+          {state.dataset.qualityReport && (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-[10px] uppercase tracking-widest font-bold">Data Quality</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40">Missing Cells</div>
+                  <div className="text-2xl font-mono mt-2">{state.dataset.qualityReport.missingCells}</div>
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40">Missing Rate</div>
+                  <div className="text-2xl font-mono mt-2">{(state.dataset.qualityReport.missingRate * 100).toFixed(1)}%</div>
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40">Duplicates</div>
+                  <div className="text-2xl font-mono mt-2">{state.dataset.qualityReport.duplicateRows}</div>
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40">Warnings</div>
+                  <div className="text-2xl font-mono mt-2">{state.dataset.qualityReport.warnings.length}</div>
+                </div>
+              </div>
+              {state.dataset.qualityReport.warnings.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {state.dataset.qualityReport.warnings.slice(0, 6).map((warning, index) => (
+                    <div key={index} className={cn(
+                      "border px-3 py-2 text-[11px]",
+                      warning.severity === 'high' ? "border-red-500/30 bg-red-500/10 text-red-100" :
+                      warning.severity === 'medium' ? "border-amber-500/30 bg-amber-500/10 text-amber-100" :
+                      "border-white/10 bg-white/5 text-white/60"
+                    )}>
+                      {warning.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <SlidersHorizontal className="w-4 h-4 text-white" />
+              <h2 className="text-[10px] uppercase tracking-widest font-bold">Modeling Objective</h2>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Target Column</label>
+                <select
+                  value={state.targetColumn || ''}
+                  onChange={(event) => handleTargetChange(event.target.value)}
+                  className="w-full bg-[#020202] border border-white/10 text-white text-xs uppercase tracking-widest p-3 outline-none font-bold"
+                >
+                  {state.dataset.columns.map((column) => (
+                    <option key={column.name} value={column.name}>{column.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Problem Type</label>
+                <select
+                  value={state.problemType || 'classification'}
+                  onChange={(event) => dispatch({ type: 'SET_TARGET', target: state.targetColumn || state.dataset!.columns[0].name, problemType: event.target.value as 'classification' | 'regression' })}
+                  className="w-full bg-[#020202] border border-white/10 text-white text-xs uppercase tracking-widest p-3 outline-none font-bold"
+                >
+                  <option value="classification">Classification</option>
+                  <option value="regression">Regression</option>
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() => dispatch({ type: 'SET_VIEW', view: 'pipeline' })}
+                  disabled={!state.targetColumn}
+                  className="w-full py-3 bg-white hover:bg-[#D4D4D4] text-black uppercase tracking-[0.2em] text-[10px] font-bold transition-colors disabled:opacity-50"
+                >
+                  Train with Python
+                </button>
+              </div>
+            </div>
+            <div className="mt-4">
+              <div className="text-[9px] uppercase tracking-widest text-white/40 mb-2">Exclude Features</div>
+              <div className="flex flex-wrap gap-2">
+                {state.dataset.columns.filter((column) => column.name !== state.targetColumn).map((column) => (
+                  <button
+                    key={column.name}
+                    onClick={() => toggleExcludedColumn(column.name)}
+                    className={cn(
+                      "px-3 py-1.5 border text-[9px] uppercase tracking-widest transition-colors",
+                      state.excludedColumns.includes(column.name)
+                        ? "border-red-400 bg-red-500/10 text-red-200"
+                        : "border-white/10 bg-white/5 text-white/60 hover:text-white"
+                    )}
+                  >
+                    {column.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-[10px] uppercase tracking-widest font-bold">Data Profiling</h2>
           </div>

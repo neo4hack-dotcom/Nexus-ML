@@ -1,5 +1,5 @@
 import React from 'react';
-import { Network, Database, MessageSquare, Activity, LayoutDashboard, Cpu, Settings, LineChart, Archive } from 'lucide-react';
+import { Network, Database, MessageSquare, Activity, LayoutDashboard, Cpu, LineChart, Archive } from 'lucide-react';
 import { AppState } from '../../types';
 import { cn } from '../../lib/utils';
 
@@ -75,9 +75,14 @@ export function Layout({
         <div className="p-6 border-t border-white/10">
           <div className="hidden md:block text-[9px] uppercase tracking-widest text-white/30 mb-3">System Status</div>
           <div className="flex items-center gap-3">
-            <div className={cn("w-2 h-2 rounded-full", state.llmConfig.isSimulated ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]")}></div>
+            <div className={cn(
+              "w-2 h-2 rounded-full",
+              state.backendConfig.status === 'online' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" :
+              state.backendConfig.status === 'checking' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" :
+              "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+            )}></div>
             <span className="hidden md:block truncate text-[10px] font-mono tracking-widest uppercase text-white/70">
-              {state.llmConfig.isSimulated ? "Simulated Mode" : "Local LLM"}
+              {state.backendConfig.status === 'online' ? "Python Backend" : state.backendConfig.status === 'checking' ? "Checking API" : "API Offline"}
             </span>
           </div>
         </div>

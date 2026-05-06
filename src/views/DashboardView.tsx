@@ -1,8 +1,7 @@
 import React from 'react';
 import { AppState } from '../types';
-import { Trophy, Activity, Target, Clock, ArrowRight, Zap } from 'lucide-react';
+import { Activity, Clock, ArrowRight } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from 'recharts';
-import { Settings2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function DashboardView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
@@ -86,13 +85,51 @@ export function DashboardView({ state, dispatch }: { state: AppState; dispatch: 
         })}
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="glass-panel p-6">
+          <h3 className="text-[10px] uppercase tracking-widest font-bold mb-4 text-white/50">Validation</h3>
+          <div className="space-y-3 text-[10px] uppercase tracking-widest">
+            <div className="flex justify-between border-b border-white/5 pb-2">
+              <span className="text-white/40">CV Metric</span>
+              <span className="font-mono">{selectedModel.metrics?.cvMetric || 'holdout'}</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-2">
+              <span className="text-white/40">CV Mean</span>
+              <span className="font-mono">{typeof selectedModel.metrics?.cvMean === 'number' ? selectedModel.metrics.cvMean.toFixed(3) : 'n/a'}</span>
+            </div>
+            <div className="flex justify-between border-b border-white/5 pb-2">
+              <span className="text-white/40">CV Std</span>
+              <span className="font-mono">{typeof selectedModel.metrics?.cvStd === 'number' ? selectedModel.metrics.cvStd.toFixed(3) : 'n/a'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 glass-panel p-6">
+          <h3 className="text-[10px] uppercase tracking-widest font-bold mb-4 text-white/50">Feature Importance</h3>
+          <div className="space-y-2">
+            {(selectedModel.featureImportance || []).slice(0, 8).map((item) => (
+              <div key={item.feature} className="grid grid-cols-[160px_1fr_52px] gap-3 items-center text-[10px] uppercase tracking-widest">
+                <span className="truncate text-white/60" title={item.feature}>{item.feature}</span>
+                <div className="h-2 bg-white/10">
+                  <div className="h-full bg-white" style={{ width: `${Math.max(2, item.importance * 100)}%` }} />
+                </div>
+                <span className="font-mono text-right">{(item.importance * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+            {(selectedModel.featureImportance || []).length === 0 && (
+              <div className="text-[10px] uppercase tracking-widest text-white/30">No native importance available for this estimator.</div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
         <div className="glass-panel p-8">
           <h3 className="text-[10px] uppercase tracking-widest font-bold mb-8 text-white/50">
             Performance Benchmark ({isClass ? 'Accuracy %' : 'R² Score'})
           </h3>
-          <div className="h-64 w-full">
+          <div className="h-64 w-full min-w-0 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(255,255,255,0.1)" />
@@ -114,7 +151,7 @@ export function DashboardView({ state, dispatch }: { state: AppState; dispatch: 
             <h3 className="text-[10px] uppercase tracking-widest font-bold mb-8 text-white/50">
               ROC Curve Overview
             </h3>
-            <div className="h-64 w-full">
+            <div className="h-64 w-full min-w-0 min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />

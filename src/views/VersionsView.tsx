@@ -1,10 +1,40 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppState, MLModel } from '../types';
-import { Archive, Clock, Database, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Archive, Clock, Database, CheckCircle2, Download, PackageOpen } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { api } from '../lib/api';
 
 export function VersionsView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
   const { datasetVersions, modelVersions, selectedModelId } = state;
+  const [exportingModelId, setExportingModelId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const activeModel = modelVersions.find((model) => model.id === selectedModelId) || modelVersions[modelVersions.length - 1];
+
+  const handleExport = async (model: MLModel) => {
+    setExportError(null);
+    setExportingModelId(model.id);
+    const modelName = model.name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
+    try {
+      await api.exportModelPickle(model.id, `${modelName}_${model.id}.pkl`);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Model export failed');
+    } finally {
+      setExportingModelId(null);
+    }
+  };
+
+  const handleBundleExport = async (model: MLModel) => {
+    setExportError(null);
+    setExportingModelId(model.id);
+    const modelName = model.name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '');
+    try {
+      await api.exportModelBundle(model.id, `${modelName}_${model.id}.zip`);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Bundle export failed');
+    } finally {
+      setExportingModelId(null);
+    }
+  };
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-12 animate-in fade-in duration-500 text-white">
@@ -53,6 +83,11 @@ export function VersionsView({ state, dispatch }: { state: AppState; dispatch: R
               <Archive className="w-3 h-3" /> Trained Models History
             </h3>
           </div>
+          {exportError && (
+            <div className="border-b border-red-500/20 bg-red-500/10 px-4 py-3 text-[10px] uppercase tracking-widest text-red-200">
+              {exportError}
+            </div>
+          )}
           
           <div className="p-0 overflow-x-auto flex-1">
              <table className="w-full text-left">
@@ -99,18 +134,36 @@ export function VersionsView({ state, dispatch }: { state: AppState; dispatch: R
                            </div>
                         </td>
                         <td className="py-4 px-6 text-right whitespace-nowrap">
-                           {isActive ? (
-                             <span className="inline-flex items-center justify-end gap-1 px-3 py-1 bg-emerald-500/10 text-[9px] font-sans font-bold uppercase tracking-widest text-emerald-500 rounded">
-                               <CheckCircle2 className="w-3 h-3" /> Active
-                             </span>
-                           ) : (
-                             <button 
-                               onClick={() => dispatch({ type: 'SELECT_MODEL', modelId: model.id })}
-                               className="px-3 py-1.5 border border-white/10 hover:border-white hover:bg-white hover:text-black transition-all rounded-sm text-[9px] font-sans font-bold uppercase tracking-widest text-white/70"
+                           <div className="flex items-center justify-end gap-2">
+                             {isActive ? (
+                               <span className="inline-flex items-center justify-end gap-1 px-3 py-1 bg-emerald-500/10 text-[9px] font-sans font-bold uppercase tracking-widest text-emerald-500 rounded">
+                                 <CheckCircle2 className="w-3 h-3" /> Active
+                               </span>
+                             ) : (
+                               <button 
+                                 onClick={() => dispatch({ type: 'SELECT_MODEL', modelId: model.id })}
+                                 className="px-3 py-1.5 border border-white/10 hover:border-white hover:bg-white hover:text-black transition-all rounded-sm text-[9px] font-sans font-bold uppercase tracking-widest text-white/70"
+                               >
+                                 Set Active
+                               </button>
+                             )}
+                             <button
+                               onClick={() => handleExport(model)}
+                               disabled={model.status !== 'success' || exportingModelId === model.id}
+                               className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500 hover:text-black transition-all rounded-sm text-[9px] font-sans font-bold uppercase tracking-widest disabled:opacity-50"
                              >
-                               Set Active
+                               <Download className="w-3 h-3" />
+                               {exportingModelId === model.id ? 'Exporting' : 'Export .pkl'}
                              </button>
-                           )}
+                             <button
+                               onClick={() => handleBundleExport(model)}
+                               disabled={model.status !== 'success' || exportingModelId === model.id}
+                               className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-white/10 bg-white/5 text-white/70 hover:bg-white hover:text-black transition-all rounded-sm text-[9px] font-sans font-bold uppercase tracking-widest disabled:opacity-50"
+                             >
+                               <PackageOpen className="w-3 h-3" />
+                               Bundle
+                             </button>
+                           </div>
                         </td>
                      </tr>
                    );
@@ -120,6 +173,52 @@ export function VersionsView({ state, dispatch }: { state: AppState; dispatch: R
           </div>
         </div>
       </div>
+
+      {activeModel && (
+        <div className="glass-panel border border-white/10 p-6">
+          <div className="flex items-start justify-between gap-6 mb-6">
+            <div>
+              <h2 className="text-[10px] uppercase tracking-widest font-bold text-white/50 mb-2">Active Model Detail</h2>
+              <div className="text-2xl font-light">{activeModel.name}</div>
+              <div className="text-[10px] text-white/40 font-mono mt-1">{activeModel.id}</div>
+            </div>
+            <div className="text-right text-[10px] uppercase tracking-widest text-white/50">
+              <div>Target: <span className="text-white">{activeModel.targetColumn || state.targetColumn}</span></div>
+              <div>Features: <span className="text-white">{activeModel.featureColumns?.length || 0}</span></div>
+              <div>Excluded: <span className="text-white">{activeModel.excludedColumns?.length || 0}</span></div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3">Feature Importance</h3>
+              <div className="space-y-2">
+                {(activeModel.featureImportance || []).slice(0, 10).map((item) => (
+                  <div key={item.feature} className="grid grid-cols-[150px_1fr_50px] gap-3 items-center text-[10px] uppercase tracking-widest">
+                    <span className="truncate text-white/60">{item.feature}</span>
+                    <div className="h-2 bg-white/10">
+                      <div className="h-full bg-emerald-400" style={{ width: `${Math.max(2, item.importance * 100)}%` }} />
+                    </div>
+                    <span className="font-mono text-right">{(item.importance * 100).toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-3">Validation & Metrics</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(activeModel.metrics || {}).filter(([key]) => !['perClass'].includes(key)).slice(0, 8).map(([key, value]) => (
+                  <div key={key} className="bg-white/5 border border-white/10 p-3">
+                    <div className="text-[9px] uppercase tracking-widest text-white/40">{key}</div>
+                    <div className="font-mono text-lg mt-1">{typeof value === 'number' ? value.toFixed(3) : String(value ?? 'n/a')}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
