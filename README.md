@@ -4,6 +4,22 @@ Nexus AutoML est une application locale d'Automated Machine Learning qui combine
 
 L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local : exploration, entraînement, validation, registry, export et inférence sont regroupés dans une seule interface.
 
+## Sommaire
+
+- [Fonctionnalités](#fonctionnalités)
+- [Démarrage Rapide](#démarrage-rapide)
+- [Stack Technique](#stack-technique)
+- [Installation](#installation)
+- [Lancement Local](#lancement-local)
+- [Guide Utilisateur](#guide-utilisateur)
+- [Architecture](#architecture)
+- [Pipeline ML](#pipeline-ml)
+- [API Backend](#api-backend)
+- [Structure du Projet](#structure-du-projet)
+- [Données et Persistance](#données-et-persistance)
+- [Export et Réutilisation d'un Modèle](#export-et-réutilisation-dun-modèle)
+- [Validation et Tests](#validation-et-tests)
+
 ## Fonctionnalités
 
 - Import de datasets CSV, XLS et XLSX.
@@ -29,6 +45,38 @@ L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local :
 - Export bundle `.zip` avec modèle, metadata, requirements et exemple d'inférence.
 - Menu `Configuration` pour connecter un LLM local compatible OpenAI.
 
+## Démarrage Rapide
+
+### Windows
+
+1. Double-cliquer sur `Install-Windows.cmd`.
+2. Double-cliquer sur `NexusAutoML-Windows.cmd`.
+3. Ouvrir l'URL Vite affichée, généralement `http://localhost:3000`.
+
+### macOS / Linux
+
+Installer les dépendances :
+
+```bash
+npm install
+python3 -m pip install -r requirements.txt
+cp .env.example .env.local
+```
+
+Terminal backend :
+
+```bash
+python3 -m backend
+```
+
+Terminal frontend :
+
+```bash
+npm run dev
+```
+
+Le frontend communique avec le backend via `VITE_API_BASE_URL`, défini par défaut sur `http://localhost:8000`.
+
 ## Stack Technique
 
 ### Frontend
@@ -51,6 +99,8 @@ L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local :
 - scikit-learn
 - joblib
 - Fichier local `DB.JSON`
+
+Le backend applicatif est exclusivement Python. Les scripts npm ne lancent que l'interface React/Vite.
 
 ## Installation
 
@@ -205,6 +255,16 @@ Les scripts npm sont réservés au frontend. Le backend se lance avec Python.
 - Si Python n'est pas détecté, réinstaller Python et cocher `Add python.exe to PATH`.
 - Si le frontend ne s'ouvre pas sur `3000`, vérifier l'URL exacte affichée par Vite.
 - La base `DB.JSON`, les datasets et les modèles restent dans `backend/storage/`.
+
+### Dépannage Windows
+
+| Symptôme | Action recommandée |
+| --- | --- |
+| `python` ou `py` introuvable | Réinstaller Python 3.10+ et activer `Add python.exe to PATH` |
+| Scripts PowerShell bloqués | Lancer les fichiers `.cmd` fournis, qui appliquent `ExecutionPolicy Bypass` pour la session |
+| Port `8000` occupé | Changer `BACKEND_PORT` avant de lancer le backend |
+| Frontend sur un autre port | Utiliser l'URL exacte affichée par Vite dans le terminal |
+| API offline dans l'interface | Vérifier que `VITE_API_BASE_URL` pointe vers le backend FastAPI |
 
 ## Guide Utilisateur
 
@@ -387,6 +447,7 @@ Fichiers principaux :
 | `src/store.ts` | Reducer global de l'application |
 | `src/lib/api.ts` | Client HTTP vers FastAPI |
 | `src/views/SetupView.tsx` | Import dataset, qualité data, objectif ML |
+| `src/views/ConfigurationView.tsx` | Configuration du LLM local compatible OpenAI |
 | `src/views/PipelineView.tsx` | Suivi du job d'entraînement |
 | `src/views/DashboardView.tsx` | Leaderboard et métriques |
 | `src/views/PredictView.tsx` | Inférence unitaire et batch |
@@ -675,12 +736,19 @@ Télécharge un bundle `.zip`.
 Nexus-ML/
   backend/
     __init__.py
+    __main__.py
     main.py
     storage/
       db.json
       datasets/
       models/
       exports/
+  scripts/
+    windows/
+      setup.ps1
+      start-app.ps1
+      start-backend.ps1
+      start-frontend.ps1
   src/
     components/
       layout/
@@ -689,6 +757,7 @@ Nexus-ML/
       utils.ts
     views/
       AgentView.tsx
+      ConfigurationView.tsx
       DashboardView.tsx
       ExploreView.tsx
       PipelineView.tsx
@@ -701,6 +770,8 @@ Nexus-ML/
     store.ts
     types.ts
   .env.example
+  Install-Windows.cmd
+  NexusAutoML-Windows.cmd
   package.json
   requirements.txt
   vite.config.ts
@@ -723,6 +794,37 @@ Contenu :
 - `exports/*.zip` : bundles d'export.
 
 Ces fichiers ne doivent pas être commités.
+
+### Format `DB.JSON`
+
+Le fichier `backend/storage/db.json` est créé automatiquement au démarrage du backend si nécessaire. Il contient les métadonnées applicatives, pas les datasets complets ni les binaires de modèles.
+
+Structure logique :
+
+```json
+{
+  "version": 1,
+  "datasets": {},
+  "models": {},
+  "jobs": {},
+  "settings": {}
+}
+```
+
+Rôle des sections :
+
+- `datasets` : métadonnées, profil et aperçu des datasets importés ;
+- `models` : métriques, paramètres, chemins locaux et informations de validation ;
+- `jobs` : état des entraînements asynchrones et logs associés ;
+- `settings` : configuration locale, dont le LLM compatible OpenAI.
+
+Les données lourdes restent séparées :
+
+- datasets sérialisés dans `backend/storage/datasets/` ;
+- pipelines scikit-learn dans `backend/storage/models/` ;
+- exports utilisateur dans `backend/storage/exports/`.
+
+La clé API LLM peut être stockée dans `settings`, mais elle n'est jamais renvoyée au frontend par l'API.
 
 ## Export et Réutilisation d'un Modèle
 
