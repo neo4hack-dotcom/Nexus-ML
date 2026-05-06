@@ -1,37 +1,51 @@
 import React, { useState } from 'react';
 import { AppState } from '../types';
-import { Play, FileJson, Table2 } from 'lucide-react';
-import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
+import { api, PredictResponse } from '../lib/api';
 
 export function PredictView({ state }: { state: AppState }) {
-  const model = state.models.find(m => m.id === state.selectedModelId);
+  const model = state.models.find(m => m.id === state.selectedModelId) || state.modelVersions.find(m => m.id === state.selectedModelId);
   const [inputData, setInputData] = useState<Record<string, string>>({});
-  const [prediction, setPrediction] = useState<string | null>(null);
+  const [prediction, setPrediction] = useState<PredictResponse | null>(null);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [isBatchScoring, setIsBatchScoring] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!model || !state.dataset) return null;
 
   // Features are all columns except the target
-  const features = state.dataset.columns.filter(c => c.name !== state.targetColumn);
+  const modelFeatureColumns = model.featureColumns || [];
+  const features = state.dataset.columns.filter(c => modelFeatureColumns.length ? modelFeatureColumns.includes(c.name) : c.name !== state.targetColumn);
 
   const handleInputChange = (colName: string, value: string) => {
     setInputData(prev => ({ ...prev, [colName]: value }));
     setPrediction(null);
+    setError(null);
   };
 
-  const handlePredict = () => {
+  const handleBatchPredict = async (file: File | null) => {
+    if (!file) return;
+    setIsBatchScoring(true);
+    setError(null);
+    try {
+      await api.batchPredict(model.id, file);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Batch inference failed');
+    } finally {
+      setIsBatchScoring(false);
+    }
+  };
+
+  const handlePredict = async () => {
     setIsPredicting(true);
-    setTimeout(() => {
-      // Fake Prediction Logic
-      if (state.problemType === 'classification') {
-        const classes = ['Yes', 'No', 'Active', 'Inactive', 'High', 'Low'];
-        setPrediction(classes[Math.floor(Math.random() * classes.length)] + ` (${(Math.random() * 0.4 + 0.5).toFixed(2)} prob)`);
-      } else {
-        setPrediction((Math.random() * 1000).toFixed(2));
-      }
+    setError(null);
+    try {
+      setPrediction(await api.predict(model.id, inputData));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Prediction failed');
+    } finally {
       setIsPredicting(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -46,6 +60,21 @@ export function PredictView({ state }: { state: AppState }) {
         <p className="text-[10px] uppercase tracking-widest text-white/40 mt-4 max-w-md">
           Test your trained model on raw feature inputs in real-time.
         </p>
+        <div className="mt-5 inline-flex items-center gap-3">
+          <input
+            id="batch-upload"
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(event) => handleBatchPredict(event.target.files?.[0] || null)}
+          />
+          <label
+            htmlFor="batch-upload"
+            className="px-4 py-2 border border-white/10 bg-white/5 hover:bg-white hover:text-black transition-colors text-[9px] uppercase tracking-widest font-bold cursor-pointer"
+          >
+            {isBatchScoring ? 'Scoring Batch...' : 'Batch Score CSV'}
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
@@ -69,6 +98,7 @@ export function PredictView({ state }: { state: AppState }) {
                 });
                 setInputData(randomParams);
                 setPrediction(null);
+                setError(null);
               }}
               className="text-[9px] uppercase tracking-widest font-bold text-white hover:text-white/70 transition-colors"
             >
@@ -121,26 +151,31 @@ export function PredictView({ state }: { state: AppState }) {
                  Predicted Outcome: {state.targetColumn}
                </div>
                <div className="text-7xl md:text-8xl font-light italic serif text-white leading-none truncate max-w-full px-4 mb-4">
-                 {prediction.split(' ')[0]}
+                 {String(prediction.prediction)}
                </div>
-               {prediction.includes('prob') && (
+               {typeof prediction.confidence === 'number' && (
                   <div className="text-[10px] font-mono tracking-widest uppercase text-emerald-500 mt-2">
-                    CONFIDENCE: {prediction.split('(')[1].replace('prob)', '').trim()}
+                    CONFIDENCE: {prediction.confidence.toFixed(3)}
                   </div>
                )}
                
                <div className="w-full mt-16 bg-[#050505] p-6 border border-white/10 text-left text-[10px] font-mono text-white/50">
-                  <div className="text-white/30 mb-4">// JSON PAYLOAD (INTERNAL SIM)</div>
+                  <div className="text-white/30 mb-4">// JSON PAYLOAD (FASTAPI)</div>
                   <div>{'{'}</div>
-                  <div className="pl-4 py-1">"target": "{state.targetColumn}",</div>
-                  <div className="pl-4 py-1 text-emerald-500 font-bold">"prediction": "{prediction.split(' ')[0]}",</div>
-                  {prediction.includes('prob') && (
-                    <div className="pl-4 py-1">"confidence": {prediction.split('(')[1].replace('prob)', '').trim()},</div>
+                  <div className="pl-4 py-1">"target": "{prediction.target}",</div>
+                  <div className="pl-4 py-1 text-emerald-500 font-bold">"prediction": "{String(prediction.prediction)}",</div>
+                  {typeof prediction.confidence === 'number' && (
+                    <div className="pl-4 py-1">"confidence": {prediction.confidence.toFixed(6)},</div>
                   )}
-                  <div className="pl-4 py-1">"latency_ms": {Math.floor(Math.random() * 20 + 2)}</div>
+                  <div className="pl-4 py-1">"latency_ms": {prediction.latencyMs}</div>
                   <div>{'}'}</div>
                </div>
              </motion.div>
+           ) : error ? (
+             <div className="flex flex-col items-center z-10 max-w-sm">
+               <h3 className="text-3xl font-light italic serif text-red-200">Prediction failed.</h3>
+               <p className="text-[11px] uppercase tracking-widest mt-6 text-red-200/70 text-center">{error}</p>
+             </div>
            ) : (
              <div className="flex flex-col items-center opacity-30 z-10">
                <h3 className="text-4xl font-light italic serif">Awaiting <br/> <span className="font-bold not-italic">Data.</span></h3>

@@ -30,7 +30,7 @@ export function AgentView({ state, dispatch }: { state: AppState; dispatch: Reac
     setIsTyping(true);
     setTimeout(() => {
       const topColumns = state.dataset!.columns.slice(0, 3).map(c => c.name).join(', ');
-      const optimized = `Analyze the dataset '${state.dataset!.filename}'. Perform feature engineering focusing on missing values, then train a model to predict ${input.trim() || 'the target'} based on features like ${topColumns}. Ensure high accuracy and provide cross-validation metrics.`;
+      const optimized = `Analyze the dataset '${state.dataset!.filename}' with the Python backend. Perform feature engineering focusing on missing values, then train scikit-learn models to predict ${input.trim() || 'the target'} based on features like ${topColumns}. Return validation metrics and choose the best model.`;
       setInput(optimized);
       setIsTyping(false);
     }, 800);
@@ -46,9 +46,9 @@ export function AgentView({ state, dispatch }: { state: AppState; dispatch: Reac
     
     setIsTyping(true);
 
-    // Simulate LLM reasoning
+    // Lightweight target extraction before the Python training run.
     setTimeout(() => {
-      // Very basic intent extraction for simulation
+      // Very basic intent extraction from the user's objective.
       const lowerInput = userMsg.toLowerCase();
       let targetFound = state.dataset?.columns.find(c => lowerInput.includes(c.name.toLowerCase()));
       
@@ -59,7 +59,7 @@ export function AgentView({ state, dispatch }: { state: AppState; dispatch: Reac
 
       const problemType = targetFound?.type === 'numeric' ? 'regression' : 'classification';
 
-      const agentReply = `I understand. You want to predict the **${targetFound?.name || 'target'}** column.\nBased on the data profile, this looks like a **${problemType}** task.\n\nI will now:\n1. Clean and impute missing values.\n2. Encode categorical columns.\n3. Train Random Forest, XGBoost, and Logistic/Linear models.\n4. Perform Cross-Validation.\n\nAre you ready to begin the pipeline?`;
+      const agentReply = `I understand. You want to predict the **${targetFound?.name || 'target'}** column.\nBased on the data profile, this looks like a **${problemType}** task.\n\nI will now:\n1. Clean and impute missing values.\n2. Encode categorical columns.\n3. Train Random Forest, Gradient Boosting, and Logistic/Linear models.\n4. Evaluate on a validation split and register the best model.\n\nAre you ready to begin the pipeline?`;
 
       setIsTyping(false);
       dispatch({ type: 'ADD_MESSAGE', message: { role: 'agent', content: agentReply } });
@@ -77,7 +77,7 @@ export function AgentView({ state, dispatch }: { state: AppState; dispatch: Reac
       <div className="mb-10 flex items-center justify-between">
         <div>
           <h1 className="text-4xl md:text-5xl font-light leading-[0.9] tracking-tighter italic serif">
-            AI <span className="font-bold not-italic">Associate.</span>
+            ML <span className="font-bold not-italic">Associate.</span>
           </h1>
           <p className="text-[10px] text-white/40 uppercase tracking-widest mt-4">Define your objective in natural language.</p>
         </div>
