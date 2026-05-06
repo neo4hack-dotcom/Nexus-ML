@@ -59,6 +59,42 @@ L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local :
 - Python 3.10+
 - pip
 
+### Installation simplifiée sous Windows
+
+Sur Windows, le projet fournit deux lanceurs double-clic à la racine :
+
+| Fichier | Rôle |
+| --- | --- |
+| `Install-Windows.cmd` | Crée `.venv`, installe les dépendances Python, installe les dépendances npm et crée `.env.local` |
+| `NexusAutoML-Windows.cmd` | Lance le backend Python et le frontend dans deux fenêtres PowerShell |
+
+Étapes recommandées :
+
+1. Installer Python 3.10+ depuis python.org en cochant `Add python.exe to PATH`.
+2. Installer Node.js LTS depuis nodejs.org.
+3. Double-cliquer sur `Install-Windows.cmd`.
+4. Double-cliquer sur `NexusAutoML-Windows.cmd`.
+5. Ouvrir l'URL affichée dans la fenêtre Vite, généralement `http://localhost:3000`.
+
+Le backend Windows utilise exclusivement Python via :
+
+```powershell
+.\.venv\Scripts\python.exe -m backend
+```
+
+Les scripts Windows sont dans :
+
+```text
+scripts/windows/
+```
+
+Ils peuvent aussi être lancés manuellement :
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\windows\setup.ps1
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\windows\start-app.ps1
+```
+
 ### Installation des dépendances frontend
 
 ```bash
@@ -86,6 +122,24 @@ VITE_API_BASE_URL="http://localhost:8000"
 ```
 
 ## Lancement Local
+
+### Windows
+
+Après l'installation :
+
+```cmd
+NexusAutoML-Windows.cmd
+```
+
+Ou en deux terminaux PowerShell :
+
+```powershell
+.\.venv\Scripts\python.exe -m backend
+```
+
+```powershell
+npm run dev
+```
 
 ### Option recommandée : deux terminaux
 
@@ -142,6 +196,14 @@ Les scripts npm sont réservés au frontend. Le backend se lance avec Python.
 | `npm run preview` | Prévisualise le build Vite |
 | `npm run lint` | Vérifie TypeScript avec `tsc --noEmit` |
 | `npm run clean` | Supprime `dist/` |
+
+## Notes Windows
+
+- Utiliser PowerShell ou Windows Terminal plutôt que l'ancien `cmd.exe` pour les commandes manuelles.
+- Si PowerShell bloque les scripts, les fichiers `.cmd` fournis lancent PowerShell avec `ExecutionPolicy Bypass` uniquement pour la session.
+- Si Python n'est pas détecté, réinstaller Python et cocher `Add python.exe to PATH`.
+- Si le frontend ne s'ouvre pas sur `3000`, vérifier l'URL exacte affichée par Vite.
+- La base SQLite, les datasets et les modèles restent dans `backend/storage/`.
 
 ## Guide Utilisateur
 
