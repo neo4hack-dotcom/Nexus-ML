@@ -37,6 +37,30 @@ export interface RegistryResponse {
   jobs: TrainingJob[];
 }
 
+export interface LLMConfigResponse {
+  base_url: string;
+  model_name: string;
+  enabled: boolean;
+  timeout_seconds: number;
+  api_key_set: boolean;
+}
+
+export interface LLMConfigPayload {
+  base_url: string;
+  model_name: string;
+  api_key?: string | null;
+  enabled: boolean;
+  timeout_seconds: number;
+}
+
+export interface LLMTestResponse {
+  status: string;
+  base_url: string;
+  model_name: string;
+  model_found: boolean | null;
+  models: string[];
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -62,6 +86,30 @@ export const api = {
 
   async registry() {
     return parseResponse<RegistryResponse>(await fetch(`${API_BASE_URL}/api/registry`));
+  },
+
+  async getLLMConfig() {
+    return parseResponse<LLMConfigResponse>(await fetch(`${API_BASE_URL}/api/llm/config`));
+  },
+
+  async saveLLMConfig(payload: LLMConfigPayload) {
+    return parseResponse<LLMConfigResponse>(
+      await fetch(`${API_BASE_URL}/api/llm/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    );
+  },
+
+  async testLLMConfig(payload: LLMConfigPayload) {
+    return parseResponse<LLMTestResponse>(
+      await fetch(`${API_BASE_URL}/api/llm/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    );
   },
 
   async uploadDataset(file: File) {

@@ -3,6 +3,7 @@ import { AppState, initialState } from './types';
 type Action =
   | { type: 'SET_VIEW'; view: AppState['view'] }
   | { type: 'UPDATE_BACKEND_CONFIG'; config: Partial<AppState['backendConfig']> }
+  | { type: 'UPDATE_LLM_CONFIG'; config: Partial<AppState['llmConfig']> }
   | { type: 'SET_DATASET'; dataset: AppState['dataset'] }
   | { type: 'SET_TARGET'; target: string; problemType: AppState['problemType'] }
   | { type: 'SET_EXCLUDED_COLUMNS'; columns: string[] }
@@ -21,6 +22,8 @@ export function appReducer(state: AppState, action: Action): AppState {
       return { ...state, view: action.view };
     case 'UPDATE_BACKEND_CONFIG':
       return { ...state, backendConfig: { ...state.backendConfig, ...action.config } };
+    case 'UPDATE_LLM_CONFIG':
+      return { ...state, llmConfig: { ...state.llmConfig, ...action.config } };
     case 'SET_DATASET':
       return { 
         ...state, 

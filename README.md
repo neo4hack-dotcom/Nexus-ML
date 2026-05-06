@@ -22,11 +22,12 @@ L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local :
   - classification : accuracy, f1, precision, recall, rapport par classe, matrice de confusion, ROC si disponible
   - régression : RMSE, R2, MAE, MAPE
 - Feature importance lorsque le modèle le permet.
-- Registry persistant avec SQLite.
+- Registry persistant au format `DB.JSON`.
 - Inférence unitaire depuis l'interface.
 - Inférence batch sur CSV ou Excel.
 - Export unitaire en `.pkl`.
 - Export bundle `.zip` avec modèle, metadata, requirements et exemple d'inférence.
+- Menu `Configuration` pour connecter un LLM local compatible OpenAI.
 
 ## Stack Technique
 
@@ -49,7 +50,7 @@ L'objectif du projet est de rendre le cycle ML plus fluide pour un usage local :
 - numpy
 - scikit-learn
 - joblib
-- SQLite
+- Fichier local `DB.JSON`
 
 ## Installation
 
@@ -203,7 +204,7 @@ Les scripts npm sont réservés au frontend. Le backend se lance avec Python.
 - Si PowerShell bloque les scripts, les fichiers `.cmd` fournis lancent PowerShell avec `ExecutionPolicy Bypass` uniquement pour la session.
 - Si Python n'est pas détecté, réinstaller Python et cocher `Add python.exe to PATH`.
 - Si le frontend ne s'ouvre pas sur `3000`, vérifier l'URL exacte affichée par Vite.
-- La base SQLite, les datasets et les modèles restent dans `backend/storage/`.
+- La base `DB.JSON`, les datasets et les modèles restent dans `backend/storage/`.
 
 ## Guide Utilisateur
 
@@ -219,6 +220,22 @@ Deux options sont disponibles :
 
 - `File Upload` : importer un fichier CSV, XLS ou XLSX.
 - `Python Demo` : générer un dataset de démonstration avec le backend Python.
+
+### Configuration LLM local
+
+Le menu `Configuration` permet d'enregistrer un serveur LLM local compatible OpenAI, par exemple Ollama, LM Studio, LocalAI ou vLLM.
+
+Champs disponibles :
+
+- `Base URL` : URL racine OpenAI-compatible, par exemple `http://localhost:11434/v1`.
+- `Model Name` : nom du modèle local, par exemple `llama3`, `mistral`, `qwen2.5`.
+- `API Key` : optionnelle pour la plupart des serveurs locaux.
+- `Timeout Seconds` : délai maximal pour les appels backend.
+- `Enabled` : active ou désactive l'utilisation future du LLM dans l'application.
+
+Le bouton `Test Connection` interroge l'endpoint OpenAI-compatible `/models` via le backend Python. Cela évite les problèmes CORS côté navigateur.
+
+La configuration est stockée dans le registry local `DB.JSON`. La clé API n'est jamais renvoyée au frontend ; l'interface indique seulement si une clé est déjà enregistrée.
 
 Après l'import, l'application affiche :
 
@@ -294,7 +311,7 @@ L'écran `Model Registry` conserve :
 - le modèle actif ;
 - les exports disponibles.
 
-Le registre est persistant grâce à SQLite.
+Le registre est persistant grâce au fichier local `DB.JSON`.
 
 ### 8. Exporter un modèle
 
@@ -339,7 +356,7 @@ flowchart LR
   UI --> API["FastAPI Backend"]
   API --> Pandas["pandas profiling"]
   API --> SK["scikit-learn training/inference"]
-  API --> Registry["SQLite registry"]
+  API --> Registry["DB.JSON registry"]
   API --> Storage["backend/storage"]
   Storage --> Models["models/*.joblib"]
   Storage --> Datasets["datasets/*.pkl"]
@@ -399,7 +416,7 @@ Stockage local :
 
 ```text
 backend/storage/
-  registry.sqlite3
+  db.json
   datasets/
   models/
   exports/
@@ -484,6 +501,10 @@ Chaque modèle entraîné est enregistré avec :
 - colonnes exclues ;
 - chemin local du modèle sérialisé.
 
+### Configuration LLM
+
+La configuration LLM est séparée du pipeline ML. Elle est stockée dans `DB.JSON` et servira aux fonctions d'assistance OpenAI-compatible sans rendre le backend dépendant d'un fournisseur cloud.
+
 ## API Backend
 
 ### Santé
@@ -501,6 +522,36 @@ GET /api/registry
 ```
 
 Retourne les datasets, modèles et jobs persistés.
+
+### Configuration LLM
+
+```http
+GET /api/llm/config
+```
+
+Retourne la configuration publique du LLM local.
+
+```http
+PUT /api/llm/config
+```
+
+Payload :
+
+```json
+{
+  "base_url": "http://localhost:11434/v1",
+  "model_name": "llama3",
+  "api_key": null,
+  "enabled": true,
+  "timeout_seconds": 30
+}
+```
+
+```http
+POST /api/llm/test
+```
+
+Teste l'endpoint `/models` du serveur OpenAI-compatible.
 
 ### Upload Dataset
 
@@ -626,7 +677,7 @@ Nexus-ML/
     __init__.py
     main.py
     storage/
-      registry.sqlite3
+      db.json
       datasets/
       models/
       exports/
@@ -665,7 +716,7 @@ backend/storage/
 
 Contenu :
 
-- `registry.sqlite3` : registry persistant ;
+- `db.json` : registry persistant au format `DB.JSON` ;
 - `datasets/*.pkl` : datasets profilés ;
 - `models/*.joblib` : pipelines scikit-learn ;
 - `exports/*.pkl` : exports pickle ;
@@ -737,7 +788,7 @@ curl http://localhost:8000/health
 ## Limites Connues
 
 - Le registry est local à la machine.
-- SQLite convient au local, mais un déploiement multi-utilisateur devrait migrer vers PostgreSQL.
+- `DB.JSON` convient au local et au mode mono-utilisateur ; un déploiement multi-utilisateur devrait prévoir un moteur transactionnel ou un service de persistance dédié.
 - Les jobs d'entraînement tournent dans le process FastAPI ; pour de gros datasets, un worker dédié serait préférable.
 - La feature importance dépend du modèle utilisé.
 - SHAP n'est pas encore intégré.

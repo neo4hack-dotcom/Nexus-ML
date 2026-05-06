@@ -1,5 +1,5 @@
 export type StepStatus = 'pending' | 'running' | 'success' | 'error';
-export type AppView = 'setup' | 'chat' | 'explore' | 'pipeline' | 'dashboard' | 'predict' | 'versions';
+export type AppView = 'setup' | 'config' | 'chat' | 'explore' | 'pipeline' | 'dashboard' | 'predict' | 'versions';
 
 export interface DataColumn {
   name: string;
@@ -78,6 +78,13 @@ export interface AppState {
     status: 'checking' | 'online' | 'offline';
     engine: string;
   };
+  llmConfig: {
+    baseUrl: string;
+    modelName: string;
+    enabled: boolean;
+    timeoutSeconds: number;
+    apiKeySet: boolean;
+  };
   dataset: DatasetMeta | null;
   datasetVersions: DatasetMeta[];
   targetColumn: string | null;
@@ -103,6 +110,13 @@ export const initialState: AppState = {
     baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
     status: 'checking',
     engine: 'FastAPI + pandas + scikit-learn',
+  },
+  llmConfig: {
+    baseUrl: 'http://localhost:11434/v1',
+    modelName: 'llama3',
+    enabled: false,
+    timeoutSeconds: 30,
+    apiKeySet: false,
   },
   dataset: null,
   datasetVersions: [],
