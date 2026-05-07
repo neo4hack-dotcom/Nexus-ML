@@ -61,6 +61,31 @@ export interface LLMTestResponse {
   models: string[];
 }
 
+export interface OracleConfigResponse {
+  host: string;
+  port: number;
+  dsn_type: 'service_name' | 'sid';
+  dsn_value: string;
+  username: string;
+  password_set: boolean;
+}
+
+export interface OracleConfigPayload {
+  host: string;
+  port: number;
+  dsn_type: 'service_name' | 'sid';
+  dsn_value: string;
+  username: string;
+  password?: string | null;
+}
+
+export interface OracleTestResponse {
+  status: string;
+  oracle_version: string;
+  host: string;
+  dsn_value: string;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -108,6 +133,40 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+      })
+    );
+  },
+
+  async getOracleConfig() {
+    return parseResponse<OracleConfigResponse>(await fetch(`${API_BASE_URL}/api/oracle/config`));
+  },
+
+  async saveOracleConfig(payload: OracleConfigPayload) {
+    return parseResponse<OracleConfigResponse>(
+      await fetch(`${API_BASE_URL}/api/oracle/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    );
+  },
+
+  async testOracleConfig(payload: OracleConfigPayload) {
+    return parseResponse<OracleTestResponse>(
+      await fetch(`${API_BASE_URL}/api/oracle/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    );
+  },
+
+  async oracleQuery(sql: string) {
+    return parseResponse<DatasetMeta>(
+      await fetch(`${API_BASE_URL}/api/oracle/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql }),
       })
     );
   },

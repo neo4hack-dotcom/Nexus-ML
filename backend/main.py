@@ -107,6 +107,19 @@ class LLMConfigRequest(BaseModel):
     timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
+class OracleConfigRequest(BaseModel):
+    host: str = "localhost"
+    port: int = Field(default=1521, ge=1, le=65535)
+    dsn_type: Literal["service_name", "sid"] = "service_name"
+    dsn_value: str = ""
+    username: str = ""
+    password: str | None = None
+
+
+class OracleQueryRequest(BaseModel):
+    sql: str
+
+
 def empty_db_json() -> dict[str, Any]:
     return {
         "version": 1,
@@ -173,6 +186,27 @@ def save_dataset_meta(payload: dict[str, Any]) -> None:
 def save_model_meta(payload: dict[str, Any]) -> None:
     MODEL_META[payload["id"]] = payload
     persist_db_json()
+
+
+def default_oracle_config() -> dict[str, Any]:
+    return {
+        "host": "localhost",
+        "port": 1521,
+        "dsn_type": "service_name",
+        "dsn_value": "",
+        "username": "",
+        "password": "",
+    }
+
+
+def public_oracle_config(config: dict[str, Any]) -> dict[str, Any]:
+    public = {key: value for key, value in config.items() if key != "password"}
+    public["password_set"] = bool(config.get("password"))
+    return public
+
+
+def get_oracle_config_private() -> dict[str, Any]:
+    return get_setting("oracle_config", default_oracle_config())
 
 
 def default_llm_config() -> dict[str, Any]:
@@ -732,6 +766,99 @@ def registry() -> dict[str, Any]:
         "models": list(MODEL_META.values()),
         "jobs": list(JOBS.values()),
     }
+
+
+@app.get("/api/oracle/config")
+def get_oracle_config_endpoint() -> dict[str, Any]:
+    return public_oracle_config(get_oracle_config_private())
+
+
+@app.put("/api/oracle/config")
+def update_oracle_config(request: OracleConfigRequest) -> dict[str, Any]:
+    current = get_oracle_config_private()
+    password = current.get("password", "") if request.password is None else request.password.strip()
+    config = {
+        "host": request.host.strip(),
+        "port": request.port,
+        "dsn_type": request.dsn_type,
+        "dsn_value": request.dsn_value.strip(),
+        "username": request.username.strip(),
+        "password": password,
+    }
+    if not config["host"]:
+        raise HTTPException(status_code=400, detail="Host is required")
+    save_setting("oracle_config", config)
+    return public_oracle_config(config)
+
+
+@app.post("/api/oracle/test")
+def test_oracle_connection(request: OracleConfigRequest | None = None) -> dict[str, Any]:
+    try:
+        import oracledb  # type: ignore[import]
+    except ImportError:
+        raise HTTPException(status_code=500, detail="oracledb package not installed. Run: pip install oracledb")
+
+    config = get_oracle_config_private()
+    if request:
+        password = config.get("password", "") if request.password is None else request.password.strip()
+        config = {
+            "host": request.host.strip(),
+            "port": request.port,
+            "dsn_type": request.dsn_type,
+            "dsn_value": request.dsn_value.strip(),
+            "username": request.username.strip(),
+            "password": password,
+        }
+
+    if not config.get("dsn_value") or not config.get("username"):
+        raise HTTPException(status_code=400, detail="DSN value and username are required to test the connection")
+
+    try:
+        if config["dsn_type"] == "service_name":
+            dsn = oracledb.makedsn(config["host"], config["port"], service_name=config["dsn_value"])
+        else:
+            dsn = oracledb.makedsn(config["host"], config["port"], sid=config["dsn_value"])
+        conn = oracledb.connect(user=config["username"], password=config["password"] or "", dsn=dsn)
+        oracle_version = conn.version
+        conn.close()
+        return {"status": "ok", "oracle_version": oracle_version, "host": config["host"], "dsn_value": config["dsn_value"]}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Oracle connection failed: {exc}") from exc
+
+
+@app.post("/api/oracle/query")
+def oracle_query(request: OracleQueryRequest) -> dict[str, Any]:
+    try:
+        import oracledb  # type: ignore[import]
+    except ImportError:
+        raise HTTPException(status_code=500, detail="oracledb package not installed. Run: pip install oracledb")
+
+    config = get_oracle_config_private()
+    if not config.get("dsn_value") or not config.get("username"):
+        raise HTTPException(status_code=400, detail="Oracle connection is not configured. Configure it in the Configuration menu.")
+
+    sql = request.sql.strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="SQL query is empty")
+    if not re.match(r"^\s*SELECT\b", sql, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are allowed")
+
+    try:
+        if config["dsn_type"] == "service_name":
+            dsn = oracledb.makedsn(config["host"], config["port"], service_name=config["dsn_value"])
+        else:
+            dsn = oracledb.makedsn(config["host"], config["port"], sid=config["dsn_value"])
+        conn = oracledb.connect(user=config["username"], password=config["password"] or "", dsn=dsn)
+        df = pd.read_sql(sql, conn)
+        conn.close()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Oracle query failed: {exc}") from exc
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="Query returned no rows")
+
+    label = f"oracle_query_{uuid.uuid4().hex[:6]}.sql"
+    return dataframe_payload(df, label)
 
 
 @app.get("/api/llm/config")

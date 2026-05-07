@@ -33,6 +33,20 @@ export default function App() {
             apiKeySet: llmConfig.api_key_set,
           },
         });
+        return api.getOracleConfig();
+      })
+      .then((oracleConfig) => {
+        dispatch({
+          type: 'UPDATE_ORACLE_CONFIG',
+          config: {
+            host: oracleConfig.host,
+            port: oracleConfig.port,
+            dsnType: oracleConfig.dsn_type,
+            dsnValue: oracleConfig.dsn_value,
+            username: oracleConfig.username,
+            passwordSet: oracleConfig.password_set,
+          },
+        });
       })
       .catch(() => dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'offline', baseUrl: api.baseUrl } }));
   }, []);
