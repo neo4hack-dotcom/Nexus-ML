@@ -1,5 +1,5 @@
 import React from 'react';
-import { Network, Database, MessageSquare, Activity, LayoutDashboard, Cpu, LineChart, Archive } from 'lucide-react';
+import { Network, Database, MessageSquare, Activity, LayoutDashboard, Cpu, LineChart, Archive, Settings } from 'lucide-react';
 import { AppState } from '../../types';
 import { cn } from '../../lib/utils';
 
@@ -14,6 +14,7 @@ export function Layout({
 }) {
   const steps = [
     { id: 'setup', icon: Database, label: 'Data & Config' },
+    { id: 'config', icon: Settings, label: 'Configuration' },
     { id: 'chat', icon: MessageSquare, label: 'AI Associate' },
     { id: 'explore', icon: LineChart, label: 'Data Explorer' },
     { id: 'pipeline', icon: Activity, label: 'Pipeline' },

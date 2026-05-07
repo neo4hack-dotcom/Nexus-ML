@@ -5,9 +5,10 @@ import math
 import pickle
 import queue
 import re
-import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
@@ -57,7 +58,7 @@ STORAGE_DIR = APP_DIR / "storage"
 MODEL_DIR = STORAGE_DIR / "models"
 DATASET_DIR = STORAGE_DIR / "datasets"
 EXPORT_DIR = STORAGE_DIR / "exports"
-REGISTRY_DB = STORAGE_DIR / "registry.sqlite3"
+DB_JSON = STORAGE_DIR / "db.json"
 for directory in (MODEL_DIR, DATASET_DIR, EXPORT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -81,6 +82,7 @@ MODELS: dict[str, Pipeline] = {}
 MODEL_META: dict[str, dict[str, Any]] = {}
 JOBS: dict[str, dict[str, Any]] = {}
 JOB_EVENTS: dict[str, "queue.Queue[dict[str, Any]]"] = {}
+SETTINGS: dict[str, dict[str, Any]] = {}
 LOCK = threading.RLock()
 
 
@@ -97,100 +99,117 @@ class PredictRequest(BaseModel):
     features: dict[str, Any]
 
 
-def connect_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(REGISTRY_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+class LLMConfigRequest(BaseModel):
+    base_url: str = "http://localhost:11434/v1"
+    model_name: str = "llama3"
+    api_key: str | None = None
+    enabled: bool = False
+    timeout_seconds: int = Field(default=30, ge=1, le=300)
 
 
-def init_registry() -> None:
-    with connect_db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS datasets (
-                id TEXT PRIMARY KEY,
-                created_at INTEGER NOT NULL,
-                filename TEXT NOT NULL,
-                payload TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS models (
-                id TEXT PRIMARY KEY,
-                dataset_id TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                payload TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                payload TEXT NOT NULL
-            )
-            """
+def empty_db_json() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "datasets": {},
+        "models": {},
+        "jobs": {},
+        "settings": {},
+    }
+
+
+def read_db_json() -> dict[str, Any]:
+    if not DB_JSON.exists():
+        return empty_db_json()
+    with DB_JSON.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    return {**empty_db_json(), **payload}
+
+
+def write_db_json(payload: dict[str, Any]) -> None:
+    DB_JSON.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = DB_JSON.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as file:
+        json.dump(json_safe(payload), file, indent=2, ensure_ascii=False)
+        file.write("\n")
+    tmp_path.replace(DB_JSON)
+
+
+def persist_db_json() -> None:
+    with LOCK:
+        write_db_json(
+            {
+                "version": 1,
+                "datasets": DATASET_META,
+                "models": MODEL_META,
+                "jobs": JOBS,
+                "settings": SETTINGS,
+            }
         )
 
 
 def load_registry() -> None:
-    init_registry()
-    with connect_db() as conn:
-        for row in conn.execute("SELECT payload FROM datasets"):
-            payload = json.loads(row["payload"])
-            DATASET_META[payload["id"]] = payload
-        for row in conn.execute("SELECT payload FROM models"):
-            payload = json.loads(row["payload"])
-            MODEL_META[payload["id"]] = payload
-        for row in conn.execute("SELECT payload FROM jobs"):
-            payload = json.loads(row["payload"])
-            if payload.get("status") == "running":
-                payload["status"] = "error"
-                payload["logs"] = [*payload.get("logs", []), "Backend restarted before the job completed."]
-            JOBS[payload["id"]] = payload
-            JOB_EVENTS[payload["id"]] = queue.Queue()
+    payload = read_db_json()
+    DATASET_META.clear()
+    DATASET_META.update(payload.get("datasets", {}))
+    MODEL_META.clear()
+    MODEL_META.update(payload.get("models", {}))
+    SETTINGS.clear()
+    SETTINGS.update(payload.get("settings", {}))
+    JOBS.clear()
+    for job_id, job in payload.get("jobs", {}).items():
+        if job.get("status") == "running":
+            job["status"] = "error"
+            job["logs"] = [*job.get("logs", []), "Backend restarted before the job completed."]
+        JOBS[job_id] = job
+        JOB_EVENTS[job_id] = queue.Queue()
+    persist_db_json()
 
 
 def save_dataset_meta(payload: dict[str, Any]) -> None:
     DATASET_META[payload["id"]] = payload
-    with connect_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO datasets (id, created_at, filename, payload) VALUES (?, ?, ?, ?)",
-            (payload["id"], payload["createdAt"], payload["filename"], json.dumps(json_safe(payload))),
-        )
+    persist_db_json()
 
 
 def save_model_meta(payload: dict[str, Any]) -> None:
     MODEL_META[payload["id"]] = payload
-    with connect_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO models (id, dataset_id, created_at, name, status, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                payload["id"],
-                payload["datasetId"],
-                payload["createdAt"],
-                payload["name"],
-                payload["status"],
-                json.dumps(json_safe(payload)),
-            ),
-        )
+    persist_db_json()
+
+
+def default_llm_config() -> dict[str, Any]:
+    return {
+        "base_url": "http://localhost:11434/v1",
+        "model_name": "llama3",
+        "api_key": "",
+        "enabled": False,
+        "timeout_seconds": 30,
+    }
+
+
+def public_llm_config(config: dict[str, Any]) -> dict[str, Any]:
+    public = {key: value for key, value in config.items() if key != "api_key"}
+    public["api_key_set"] = bool(config.get("api_key"))
+    return public
+
+
+def get_setting(key: str, default: dict[str, Any]) -> dict[str, Any]:
+    if key not in SETTINGS:
+        return default.copy()
+    return {**default, **SETTINGS[key]}
+
+
+def save_setting(key: str, payload: dict[str, Any]) -> None:
+    SETTINGS[key] = payload
+    persist_db_json()
+
+
+def get_llm_config_private() -> dict[str, Any]:
+    return get_setting("llm_config", default_llm_config())
 
 
 def save_job(job: dict[str, Any]) -> None:
     job["updatedAt"] = int(time.time() * 1000)
     JOBS[job["id"]] = job
-    with connect_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO jobs (id, created_at, updated_at, status, payload) VALUES (?, ?, ?, ?, ?)",
-            (job["id"], job["createdAt"], job["updatedAt"], job["status"], json.dumps(json_safe(job))),
-        )
+    persist_db_json()
 
 
 def json_safe(value: Any) -> Any:
@@ -712,6 +731,68 @@ def registry() -> dict[str, Any]:
         "datasets": list(DATASET_META.values()),
         "models": list(MODEL_META.values()),
         "jobs": list(JOBS.values()),
+    }
+
+
+@app.get("/api/llm/config")
+def get_llm_config() -> dict[str, Any]:
+    return public_llm_config(get_llm_config_private())
+
+
+@app.put("/api/llm/config")
+def update_llm_config(request: LLMConfigRequest) -> dict[str, Any]:
+    current = get_llm_config_private()
+    api_key = current.get("api_key", "") if request.api_key is None else request.api_key.strip()
+    config = {
+        "base_url": request.base_url.rstrip("/"),
+        "model_name": request.model_name.strip(),
+        "api_key": api_key,
+        "enabled": request.enabled,
+        "timeout_seconds": request.timeout_seconds,
+    }
+    if not config["base_url"]:
+        raise HTTPException(status_code=400, detail="LLM base URL is required")
+    if not config["model_name"]:
+        raise HTTPException(status_code=400, detail="LLM model name is required")
+    save_setting("llm_config", config)
+    return public_llm_config(config)
+
+
+@app.post("/api/llm/test")
+def test_llm_config(request: LLMConfigRequest | None = None) -> dict[str, Any]:
+    config = get_llm_config_private()
+    if request:
+        config = {
+            **config,
+            "base_url": request.base_url.rstrip("/"),
+            "model_name": request.model_name.strip(),
+            "api_key": config.get("api_key", "") if request.api_key is None else request.api_key.strip(),
+            "enabled": request.enabled,
+            "timeout_seconds": request.timeout_seconds,
+        }
+
+    url = f"{config['base_url'].rstrip('/')}/models"
+    headers = {"Accept": "application/json"}
+    if config.get("api_key"):
+        headers["Authorization"] = f"Bearer {config['api_key']}"
+
+    try:
+        http_request = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(http_request, timeout=int(config.get("timeout_seconds", 30))) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM server returned HTTP {exc.code}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach OpenAI-compatible LLM server: {exc}") from exc
+
+    models = payload.get("data", []) if isinstance(payload, dict) else []
+    model_ids = [model.get("id") for model in models if isinstance(model, dict) and model.get("id")]
+    return {
+        "status": "ok",
+        "base_url": config["base_url"],
+        "model_name": config["model_name"],
+        "model_found": config["model_name"] in model_ids if model_ids else None,
+        "models": model_ids[:25],
     }
 
 
