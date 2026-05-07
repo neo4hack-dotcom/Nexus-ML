@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Database, FileSpreadsheet, CheckCircle2, ChevronRight, ServerCog, Loader2, FlaskConical, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { Database, FileSpreadsheet, CheckCircle2, ChevronRight, ServerCog, Loader2, FlaskConical, ShieldCheck, SlidersHorizontal, Play, AlertCircle } from 'lucide-react';
 import { AppState } from '../types';
 import { cn } from '../lib/utils';
 import { api } from '../lib/api';
 
+type IngestMode = 'file' | 'demo' | 'oracle';
+
 export function SetupView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
   const [dragActive, setDragActive] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
+  const [ingestMode, setIngestMode] = useState<IngestMode>('file');
   const [isLoadingDataset, setIsLoadingDataset] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oracleSql, setOracleSql] = useState('SELECT * FROM my_table WHERE ROWNUM <= 10000');
 
   useEffect(() => {
     api.health()
@@ -109,7 +112,7 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
     try {
       const dataset = await api.createDemoDataset();
       dispatch({ type: 'SET_DATASET', dataset });
-      setShowDemo(false);
+      setIngestMode('file');
       dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'online' } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create demo dataset');
@@ -118,6 +121,23 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
       setIsLoadingDataset(false);
     }
   };
+
+  const handleOracleQuery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsLoadingDataset(true);
+    try {
+      const dataset = await api.oracleQuery(oracleSql);
+      dispatch({ type: 'SET_DATASET', dataset });
+      dispatch({ type: 'UPDATE_BACKEND_CONFIG', config: { status: 'online' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Oracle query failed');
+    } finally {
+      setIsLoadingDataset(false);
+    }
+  };
+
+  const oracleConfigured = Boolean(state.oracleConfig.dsnValue && state.oracleConfig.username);
 
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -175,17 +195,24 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
               <h2 className="text-[10px] uppercase tracking-widest font-bold">Data Ingestion</h2>
             </div>
             <div className="flex bg-black p-1 rounded-sm border border-white/10">
-              <button 
-                onClick={() => setShowDemo(false)}
-                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", !showDemo && "bg-white text-black")}
+              <button
+                onClick={() => setIngestMode('file')}
+                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", ingestMode === 'file' && "bg-white text-black")}
               >
                 File Upload
               </button>
-              <button 
-                onClick={() => setShowDemo(true)}
-                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", showDemo && "bg-white text-black")}
+              <button
+                onClick={() => setIngestMode('oracle')}
+                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5", ingestMode === 'oracle' && "bg-white text-black")}
               >
-                Python Demo
+                <Database className="w-3 h-3" />
+                Oracle
+              </button>
+              <button
+                onClick={() => setIngestMode('demo')}
+                className={cn("px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest transition-all", ingestMode === 'demo' && "bg-white text-black")}
+              >
+                Demo
               </button>
             </div>
           </div>
@@ -206,7 +233,7 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
                 <span>Rows: {state.dataset.rowCount.toLocaleString()}</span>
                 <span>Columns: {state.dataset.colCount}</span>
               </p>
-              <button 
+              <button
                 onClick={() => dispatch({ type: 'SET_VIEW', view: state.targetColumn ? 'pipeline' : 'chat' })}
                 className="mt-8 px-6 py-3 bg-white hover:bg-[#D4D4D4] text-black uppercase tracking-[0.2em] text-xs font-bold transition-colors flex items-center gap-2"
               >
@@ -214,7 +241,7 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
-          ) : showDemo ? (
+          ) : ingestMode === 'demo' ? (
             <form onSubmit={handleCreateDemo} className="flex-1 flex flex-col items-center justify-center gap-6 text-center py-10">
               <FlaskConical className="w-12 h-12 text-emerald-400" />
               <div>
@@ -228,8 +255,60 @@ export function SetupView({ state, dispatch }: { state: AppState; dispatch: Reac
                 Create Demo Dataset
               </button>
             </form>
+          ) : ingestMode === 'oracle' ? (
+            <form onSubmit={handleOracleQuery} className="flex-1 flex flex-col gap-5 py-2">
+              {!oracleConfigured && (
+                <div className="flex items-start gap-3 border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>
+                    La connexion Oracle n'est pas configurée.{' '}
+                    <button
+                      type="button"
+                      onClick={() => dispatch({ type: 'SET_VIEW', view: 'config' })}
+                      className="underline hover:no-underline font-bold"
+                    >
+                      Configurer maintenant →
+                    </button>
+                  </span>
+                </div>
+              )}
+
+              {oracleConfigured && (
+                <div className="flex items-center gap-3 border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 text-[10px] uppercase tracking-widest text-emerald-300">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>
+                    Connecté à {state.oracleConfig.username}@{state.oracleConfig.host}:{state.oracleConfig.port}
+                    {' '}({state.oracleConfig.dsnType === 'service_name' ? 'service' : 'SID'}: {state.oracleConfig.dsnValue})
+                  </span>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 flex-1">
+                <label className="text-[9px] uppercase tracking-widest text-white/40">Requête SQL (SELECT uniquement)</label>
+                <textarea
+                  value={oracleSql}
+                  onChange={(e) => setOracleSql(e.target.value)}
+                  rows={8}
+                  spellCheck={false}
+                  className="w-full flex-1 bg-[#020202] border border-white/10 p-4 text-sm font-mono focus:outline-none focus:border-white/40 resize-none leading-relaxed"
+                  placeholder="SELECT col1, col2, target FROM schema.table WHERE condition = 'value'"
+                />
+                <p className="text-[9px] text-white/25 uppercase tracking-widest">
+                  Les données seront récupérées localement et traitées exactement comme un fichier importé.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoadingDataset || !oracleSql.trim() || !oracleConfigured}
+                className="self-start px-6 py-3 bg-white text-black hover:bg-[#D4D4D4] font-bold uppercase tracking-[0.2em] text-[10px] transition-colors flex items-center gap-3 disabled:opacity-50"
+              >
+                {isLoadingDataset ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                {isLoadingDataset ? 'Exécution…' : 'Exécuter la requête'}
+              </button>
+            </form>
           ) : (
-            <div 
+            <div
               className={cn(
                 "flex-1 border border-dashed flex flex-col items-center justify-center p-8 text-center transition-all cursor-pointer rounded-sm",
                 dragActive ? "border-white bg-white/5" : "border-white/20 hover:border-white/40 hover:bg-white/5"

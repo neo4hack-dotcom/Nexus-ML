@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
+  Database,
   KeyRound,
   Loader2,
   PlugZap,
@@ -13,7 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AppState } from '../types';
-import { api, LLMTestResponse } from '../lib/api';
+import { api, LLMTestResponse, OracleConfigPayload } from '../lib/api';
 import { cn } from '../lib/utils';
 
 const PROVIDERS = [
@@ -44,6 +45,282 @@ const PROVIDERS = [
 ] as const;
 
 type ConnectionStatus = 'idle' | 'checking' | 'ok' | 'warn' | 'error';
+
+type OracleConnectionStatus = 'idle' | 'checking' | 'ok' | 'error';
+
+function OracleSection({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
+  const [host, setHost] = useState(state.oracleConfig.host);
+  const [port, setPort] = useState(String(state.oracleConfig.port));
+  const [dsnType, setDsnType] = useState<'service_name' | 'sid'>(state.oracleConfig.dsnType);
+  const [dsnValue, setDsnValue] = useState(state.oracleConfig.dsnValue);
+  const [username, setUsername] = useState(state.oracleConfig.username);
+  const [password, setPassword] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<OracleConnectionStatus>('idle');
+  const [oracleVersion, setOracleVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHost(state.oracleConfig.host);
+    setPort(String(state.oracleConfig.port));
+    setDsnType(state.oracleConfig.dsnType);
+    setDsnValue(state.oracleConfig.dsnValue);
+    setUsername(state.oracleConfig.username);
+  }, [state.oracleConfig]);
+
+  const buildPayload = useCallback((): OracleConfigPayload => ({
+    host: host.trim(),
+    port: Number(port) || 1521,
+    dsn_type: dsnType,
+    dsn_value: dsnValue.trim(),
+    username: username.trim(),
+    password: password.trim() || null,
+  }), [host, port, dsnType, dsnValue, username, password]);
+
+  const applyConfig = (cfg: Awaited<ReturnType<typeof api.getOracleConfig>>) => {
+    dispatch({
+      type: 'UPDATE_ORACLE_CONFIG',
+      config: {
+        host: cfg.host,
+        port: cfg.port,
+        dsnType: cfg.dsn_type,
+        dsnValue: cfg.dsn_value,
+        username: cfg.username,
+        passwordSet: cfg.password_set,
+      },
+    });
+  };
+
+  const handleTest = async () => {
+    setIsTesting(true);
+    setStatus('checking');
+    setError(null);
+    setMessage(null);
+    setOracleVersion(null);
+    try {
+      const result = await api.testOracleConfig(buildPayload());
+      setStatus('ok');
+      setOracleVersion(result.oracle_version);
+      setMessage(`Connexion réussie — Oracle ${result.oracle_version}`);
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof Error ? err.message : 'Connexion Oracle échouée.');
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const saved = await api.saveOracleConfig(buildPayload());
+      applyConfig(saved);
+      setPassword('');
+      setMessage('Configuration Oracle sauvegardée.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Impossible de sauvegarder la configuration Oracle.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const oracleStatusColors: Record<OracleConnectionStatus, string> = {
+    idle: 'bg-white/20',
+    checking: 'bg-amber-400 animate-pulse',
+    ok: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+    error: 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]',
+  };
+  const oracleStatusLabel: Record<OracleConnectionStatus, string> = {
+    idle: 'Non testé',
+    checking: 'Vérification…',
+    ok: 'Connecté',
+    error: 'Hors ligne',
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-2 glass-panel p-6">
+        <div className="flex items-center justify-between pb-4 border-b border-white/5 mb-6">
+          <div className="flex items-center gap-3">
+            <Database className="w-4 h-4 text-white" />
+            <h2 className="text-[10px] uppercase tracking-widest font-bold">Oracle Database</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={cn('w-2 h-2 rounded-full transition-all', oracleStatusColors[status])} />
+            <span className="text-[9px] uppercase tracking-widest text-white/40">{oracleStatusLabel[status]}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Host</label>
+            <input
+              value={host}
+              onChange={(e) => { setHost(e.target.value); setStatus('idle'); }}
+              placeholder="localhost"
+              className="w-full bg-[#020202] border border-white/10 p-3 text-sm font-mono focus:outline-none focus:border-white/50"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Port</label>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              className="w-full bg-[#020202] border border-white/10 p-3 text-sm font-mono focus:outline-none focus:border-white/50"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Type de DSN</label>
+            <div className="flex bg-black border border-white/10 p-1">
+              <button
+                onClick={() => setDsnType('service_name')}
+                className={cn(
+                  'flex-1 py-2 text-[9px] font-bold uppercase tracking-widest transition-all',
+                  dsnType === 'service_name' ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+                )}
+              >
+                Service Name
+              </button>
+              <button
+                onClick={() => setDsnType('sid')}
+                className={cn(
+                  'flex-1 py-2 text-[9px] font-bold uppercase tracking-widest transition-all',
+                  dsnType === 'sid' ? 'bg-white text-black' : 'text-white/50 hover:text-white'
+                )}
+              >
+                SID
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">
+              {dsnType === 'service_name' ? 'Service Name' : 'SID'}
+            </label>
+            <input
+              value={dsnValue}
+              onChange={(e) => { setDsnValue(e.target.value); setStatus('idle'); }}
+              placeholder={dsnType === 'service_name' ? 'ORCL' : 'XE'}
+              className="w-full bg-[#020202] border border-white/10 p-3 text-sm font-mono focus:outline-none focus:border-white/50"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Utilisateur</label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="system"
+              className="w-full bg-[#020202] border border-white/10 p-3 text-sm font-mono focus:outline-none focus:border-white/50"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] uppercase tracking-widest text-white/40 block mb-2">Mot de passe</label>
+            <div className="relative">
+              <KeyRound className="absolute left-3 top-3.5 w-4 h-4 text-white/30" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={state.oracleConfig.passwordSet ? 'Mot de passe enregistré — laisser vide pour conserver' : 'Mot de passe Oracle'}
+                className="w-full bg-[#020202] border border-white/10 p-3 pl-10 text-sm font-mono focus:outline-none focus:border-white/50"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 mt-8">
+          <button
+            onClick={handleTest}
+            disabled={isTesting || !host.trim() || !dsnValue.trim() || !username.trim()}
+            className="px-4 py-3 border border-white/10 bg-white/5 hover:bg-white hover:text-black transition-colors text-[10px] uppercase tracking-widest font-bold flex items-center gap-2 disabled:opacity-50"
+          >
+            {isTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
+            Tester
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isSaving || !host.trim() || !dsnValue.trim() || !username.trim()}
+            className="px-5 py-3 bg-white text-black hover:bg-[#D4D4D4] transition-colors text-[10px] uppercase tracking-widest font-bold flex items-center gap-2 disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Sauvegarder
+          </button>
+        </div>
+
+        {(message || error) && (
+          <div className={cn(
+            'mt-6 border px-4 py-3 text-sm',
+            error ? 'border-red-500/30 bg-red-500/10 text-red-100' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+          )}>
+            {error || message}
+          </div>
+        )}
+      </div>
+
+      {/* State panel */}
+      <div className="glass-panel p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <h2 className="text-[10px] uppercase tracking-widest font-bold">État actuel</h2>
+        </div>
+        <div className="space-y-3 text-[10px] uppercase tracking-widest">
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">Host</span>
+            <span className="font-mono truncate">{state.oracleConfig.host || '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">Port</span>
+            <span className="font-mono">{state.oracleConfig.port}</span>
+          </div>
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">Type</span>
+            <span>{state.oracleConfig.dsnType}</span>
+          </div>
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">{state.oracleConfig.dsnType === 'service_name' ? 'Service' : 'SID'}</span>
+            <span className="font-mono truncate">{state.oracleConfig.dsnValue || '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">Utilisateur</span>
+            <span className="font-mono truncate">{state.oracleConfig.username || '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-white/5 pb-2 gap-4">
+            <span className="text-white/40">Mot de passe</span>
+            <span>{state.oracleConfig.passwordSet ? 'Enregistré' : 'Non défini'}</span>
+          </div>
+          <div className="flex justify-between pb-2 gap-4">
+            <span className="text-white/40">Connexion</span>
+            <span className={cn({
+              'text-emerald-300': status === 'ok',
+              'text-amber-300': status === 'checking',
+              'text-red-400': status === 'error',
+              'text-white/40': status === 'idle',
+            })}>
+              {oracleStatusLabel[status]}
+            </span>
+          </div>
+        </div>
+        {oracleVersion && (
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="text-[9px] uppercase tracking-widest text-white/40 mb-1">Version Oracle</div>
+            <div className="text-[11px] font-mono text-emerald-300">{oracleVersion}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function ConfigurationView({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<any> }) {
   const [baseUrl, setBaseUrl] = useState(state.llmConfig.baseUrl);
@@ -200,6 +477,13 @@ export function ConfigurationView({ state, dispatch }: { state: AppState; dispat
         </p>
       </div>
 
+      {/* LLM section header */}
+      <div className="flex items-center gap-3 mt-2">
+        <Server className="w-4 h-4 text-white/40" />
+        <h2 className="text-[10px] uppercase tracking-widest font-bold text-white/40">Local LLM</h2>
+        <div className="flex-1 border-t border-white/5" />
+      </div>
+
       {/* Provider presets */}
       <div className="glass-panel p-5">
         <div className="flex items-center gap-2 mb-4">
@@ -229,7 +513,7 @@ export function ConfigurationView({ state, dispatch }: { state: AppState; dispat
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 [&>*]:self-start">
         {/* Form */}
         <div className="lg:col-span-2 glass-panel p-6">
           <div className="flex items-center justify-between pb-4 border-b border-white/5 mb-6">
@@ -453,6 +737,14 @@ export function ConfigurationView({ state, dispatch }: { state: AppState; dispat
           )}
         </div>
       </div>
+
+      <div className="flex items-center gap-3">
+        <Database className="w-4 h-4 text-white/40" />
+        <h2 className="text-[10px] uppercase tracking-widest font-bold text-white/40">Oracle Database</h2>
+        <div className="flex-1 border-t border-white/5" />
+      </div>
+
+      <OracleSection state={state} dispatch={dispatch} />
     </div>
   );
 }

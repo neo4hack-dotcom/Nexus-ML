@@ -85,6 +85,14 @@ export interface AppState {
     timeoutSeconds: number;
     apiKeySet: boolean;
   };
+  oracleConfig: {
+    host: string;
+    port: number;
+    dsnType: 'service_name' | 'sid';
+    dsnValue: string;
+    username: string;
+    passwordSet: boolean;
+  };
   dataset: DatasetMeta | null;
   datasetVersions: DatasetMeta[];
   targetColumn: string | null;
@@ -117,6 +125,14 @@ export const initialState: AppState = {
     enabled: false,
     timeoutSeconds: 30,
     apiKeySet: false,
+  },
+  oracleConfig: {
+    host: 'localhost',
+    port: 1521,
+    dsnType: 'service_name',
+    dsnValue: '',
+    username: '',
+    passwordSet: false,
   },
   dataset: null,
   datasetVersions: [],
